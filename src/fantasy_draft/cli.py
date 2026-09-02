@@ -67,11 +67,11 @@ RISK = typer.Option(
 )
 NOFP = typer.Option(False, "--no-consensus", help="Skip FantasyPros expert consensus.")
 STRAT = typer.Option(
-    "vona", "--strategy",
-    help="How to rank. 'vona' scores what a player adds now less what his position "
-         "would still offer at your next pick. 'lineup' drops the wait adjustment. "
-         "'simulate' plays the rest of the draft out - backtests worse, kept for "
-         "comparison and required by --objective win.",
+    "lineup", "--strategy",
+    help="How to rank. 'lineup' scores what a player adds to your starting lineup and "
+         "backtests best. 'vona' also subtracts what his position would still offer at "
+         "your next pick. 'simulate' plays the rest of the draft out - backtests worst, "
+         "kept for comparison and required by --objective win.",
 )
 OBJ = typer.Option(
     "points", "--objective",

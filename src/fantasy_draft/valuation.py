@@ -107,20 +107,24 @@ class LineupEvaluator:
         lineup a manager would have set, on what actually happened.
         Each pool must be sorted by ranking_key, descending.
 
-        A slot you have not drafted yet is scored at replacement level, not at
-        zero. That matters more than it sounds: an empty kicker slot valued at
-        zero makes drafting any kicker look worth his whole 78 points, when in
-        truth every team streams one off waivers for about the same. Treating
-        the empty slot as already holding a replacement player is what stops the
-        engine spending a sixth-round pick to fill it.
+        Every slot is floored at replacement level, whether or not you drafted
+        someone for it. An empty slot valued at zero makes drafting any kicker
+        look worth his whole 78 points, when every team streams one for about
+        the same. And a drafted starter who collapses is not worth his 40 points
+        either - you drop him in October and stream the position.
+
+        Flooring the downside is not a detail. It is most of what makes upside
+        worth paying for: a boom-or-bust player's bad seasons cost you only the
+        gap down to the waiver wire, while his good ones are yours in full.
         """
         used: dict[str, int] = {}
         total = 0.0
         for pos, count in self.dedicated.items():
             pool = pools.get(pos) or []
+            floor = self.replacement.get(pos, 0.0)
             take = min(count, len(pool))
-            total += sum(payoff for _key, payoff in pool[:take])
-            total += (count - take) * self.replacement.get(pos, 0.0)
+            total += sum(max(payoff, floor) for _key, payoff in pool[:take])
+            total += (count - take) * floor
             used[pos] = take
         for _slot, count, eligible in self.flex:
             for _ in range(count):
@@ -134,12 +138,13 @@ class LineupEvaluator:
                     if i < len(pool) and pool[i][0] > best_key:
                         best_key = pool[i][0]
                         best_pos = pos
+                floor = max(
+                    (self.replacement.get(pos, 0.0) for pos in eligible), default=0.0
+                )
                 if best_pos is None:
-                    total += max(
-                        (self.replacement.get(pos, 0.0) for pos in eligible), default=0.0
-                    )
+                    total += floor
                     continue
-                total += pools[best_pos][used.get(best_pos, 0)][1]
+                total += max(pools[best_pos][used.get(best_pos, 0)][1], floor)
                 used[best_pos] = used.get(best_pos, 0) + 1
         return total, used
 
@@ -149,9 +154,10 @@ class LineupEvaluator:
         total = 0.0
         for pos, count in self.dedicated.items():
             lst = roster.get(pos) or []
+            floor = self.replacement.get(pos, 0.0)
             take = min(count, len(lst))
-            total -= sum(lst[:take])  # stored negated for descending sort
-            total += (count - take) * self.replacement.get(pos, 0.0)
+            total += sum(max(-v, floor) for v in lst[:take])  # stored negated
+            total += (count - take) * floor
             used[pos] = take
         for _slot, count, eligible in self.flex:
             for _ in range(count):
@@ -165,12 +171,13 @@ class LineupEvaluator:
                     if i < len(lst) and -lst[i] > best_val:
                         best_val = -lst[i]
                         best_pos = pos
+                floor = max(
+                    (self.replacement.get(pos, 0.0) for pos in eligible), default=0.0
+                )
                 if best_pos is None:
-                    total += max(
-                        (self.replacement.get(pos, 0.0) for pos in eligible), default=0.0
-                    )
+                    total += floor
                     continue
-                total += best_val
+                total += max(best_val, floor)
                 used[best_pos] = used.get(best_pos, 0) + 1
         return total, used
 
