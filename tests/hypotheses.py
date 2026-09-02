@@ -20,6 +20,21 @@ H3 - Ceiling-chasing once bench-bound: once a roster fills every starter slot,
      of a bench pick is already covered by the waiver floor.
      NO SIGNAL. +2.9 +/- 2.5 points over 120 paired drafts, t = 1.13. Plausible
      but not distinguishable from noise at this sample size; not shipped.
+
+H4 - Does Robust RB generalise? Same bonus (15%, first four rounds), applied to
+     WR, TE and QB instead of RB, to test whether front-loading any position
+     helps or whether the RB effect is specific.
+     REJECTED for all three, and informative: WR -9.0 +/- 2.6 (t=-3.42, clear
+     loss), TE -7.9 +/- 3.7 (t=-2.13, suggestive loss), QB -2.2 +/- 4.2
+     (t=-0.52, no effect). Robust RB is not an artifact of generically
+     rewarding early picks - the other three positions do not show it, and two
+     of them lose money from it.
+
+H5 - Tier-cliff bonus: reward taking the last player in his gap-based tier -
+     the one right before a real drop to the next echelon at his position -
+     using the same tiers already shown in the "Tier" column. Distinct from
+     vona: a static gap check, no pick-timing or availability estimate.
+     NO SIGNAL. +2.7 +/- 4.6 points over 120 paired drafts, t = 0.60.
 """
 
 import math
@@ -31,7 +46,10 @@ from fantasy_draft.sleeper import SleeperClient
 
 LEAGUE_ID = "YOUR_LEAGUE_ID"
 SEASONS = ("2025", "2024")
-STRATEGIES = ("greedy", "reach_averse", "ceiling_bench")
+STRATEGIES = (
+    "greedy", "reach_averse", "ceiling_bench",
+    "posbonus_wr", "posbonus_te", "posbonus_qb", "tier_cliff",
+)
 
 
 def main() -> None:
@@ -49,7 +67,7 @@ def main() -> None:
                 pooled[s].extend(res[s].points)
 
         print(f"\npooled {len(pooled['greedy'])} paired drafts, baseline = greedy (shipped lineup)")
-        for h in ("reach_averse", "ceiling_bench"):
+        for h in ("reach_averse", "ceiling_bench", "posbonus_wr", "posbonus_te", "posbonus_qb", "tier_cliff"):
             diffs = [a - b for a, b in zip(pooled[h], pooled["greedy"])]
             mean = statistics.mean(diffs)
             err = statistics.stdev(diffs) / math.sqrt(len(diffs))

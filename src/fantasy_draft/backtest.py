@@ -36,7 +36,13 @@ from .projections import (
     replacement_levels,
     score_stats,
 )
-from .recommend import ROBUST_RB_BONUS, ROBUST_RB_ROUNDS, expected_best_value, recommend
+from .recommend import (
+    ROBUST_RB_BONUS,
+    ROBUST_RB_ROUNDS,
+    assign_tiers,
+    expected_best_value,
+    recommend,
+)
 from .simulate import RolloutConfig, adp_sigma, availability
 from .sleeper import SleeperClient
 from .valuation import HINDSIGHT, LineupEvaluator, add_to_roster
@@ -49,11 +55,21 @@ CAPS = {"QB": 2, "RB": 6, "WR": 6, "TE": 2, "K": 1, "DEF": 1}
 
 STRATEGIES = ("engine", "greedy", "blind", "vona", "adp", "vor", "need")
 
-# Two rejected hypotheses live on in reach_averse and ceiling_bench below,
-# excluded from STRATEGIES so a normal backtest run does not include them.
-# tests/hypotheses.py re-runs the full comparison, greedy included, and
-# records why each was kept or dropped.
+# Rejected hypotheses live on below, excluded from STRATEGIES so a normal
+# backtest run does not include them. tests/hypotheses.py re-runs the full
+# comparison, greedy included, and records why each was kept or dropped.
 REACH_LAMBDA = 0.3
+
+# H4: does Robust RB generalise, or is RB special? Same magnitude, same first
+# four rounds, applied to another position instead.
+POSBONUS_ROUNDS = ROBUST_RB_ROUNDS
+POSBONUS_AMOUNT = ROBUST_RB_BONUS
+
+# H5: tier-cliff bonus. Reward taking the last player in his tier - the one
+# right before a real gap to the next echelon at his position - using the same
+# gap-based tiers already shown in the "Tier" column. Distinct from vona: no
+# pick-timing or availability estimate involved, just "is a cliff imminent".
+CLIFF_BONUS = 0.20
 
 
 
@@ -169,7 +185,10 @@ def baseline_pick(
     if not legal:
         return None
 
-    lineup_family = ("greedy", "blind", "vona", "reach_averse", "ceiling_bench")
+    lineup_family = (
+        "greedy", "blind", "vona", "reach_averse", "ceiling_bench",
+        "posbonus_wr", "posbonus_te", "posbonus_qb", "tier_cliff",
+    )
     if team.strategy in lineup_family:
         # The engine's lineup model with no simulation: take whoever adds most to
         # the starting lineup right now. Isolates what the rollout is worth.
@@ -199,6 +218,28 @@ def baseline_pick(
                 return now - REACH_LAMBDA * reach
 
             return max(legal[:60], key=score_reach)
+
+        if team.strategy.startswith("posbonus_"):
+            target_pos = team.strategy.rsplit("_", 1)[-1].upper()
+            round_no = (pick_no - 1) // league.teams + 1 if pick_no else 1
+            bonus = POSBONUS_AMOUNT if round_no <= POSBONUS_ROUNDS else 0.0
+
+            def score_posbonus(p: Player) -> float:
+                now = evaluator.marginal(roster, p.position, p.value, base, p.bye or 0)
+                return now * (1.0 + bonus) if p.position == target_pos else now
+
+            return max(legal[:60], key=score_posbonus)
+
+        if team.strategy == "tier_cliff":
+            tiers, tier_sizes = assign_tiers(pool)
+
+            def score_cliff(p: Player) -> float:
+                now = evaluator.marginal(roster, p.position, p.value, base, p.bye or 0)
+                tier = tiers.get(p.player_id, 1)
+                last_in_tier = tier_sizes.get((p.position, tier), 1) == 1
+                return now * (1.0 + CLIFF_BONUS) if last_in_tier else now
+
+            return max(legal[:60], key=score_cliff)
 
         if team.strategy == "ceiling_bench":
             starters_count = sum(league.starter_slots.values())

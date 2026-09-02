@@ -309,15 +309,23 @@ I get him later" reasoning, in closed form and with no noise, and it is worse
 than ignoring the question entirely. The wait columns are still shown because
 they are useful to read; the engine no longer acts on them.
 
-**Two of three tested strategy hypotheses did not survive contact with data.**
-Alongside Robust RB (kept, above), reach-aversion - discounting a pick by how
+**Five of six tested strategy hypotheses did not survive contact with data.**
+Alongside Robust RB (kept, above): reach-aversion - discounting a pick by how
 far it reaches past his ADP, to hedge against the model being wrong about one
-player - lost by 7.3 ± 3.6 points (t = -2.04): the model's edge over ADP is the
-point of a value model, and pulling picks back toward consensus gives some of
-it away. Chasing ceiling instead of mean value once a roster's starters are
-already filled showed no signal (+2.9 ± 2.5, t = 1.13) - plausible, but not
-distinguishable from noise at this sample size. `tests/hypotheses.py`
-reproduces both comparisons.
+player - lost by 7.3 ± 3.6 points (t = -2.04), since the model's edge over ADP
+is the point of a value model and pulling picks back toward consensus gives
+some of it away. Ceiling-chasing once a roster's starters are filled showed no
+signal (+2.9 ± 2.5, t = 1.13). A tier-cliff bonus - reward taking the last
+player before a real gap to the next echelon - also showed nothing (+2.7 ± 4.6,
+t = 0.60).
+
+The more useful negative result: applying Robust RB's exact bonus to WR, TE and
+QB instead of RB tests whether it is a genuine RB effect or an artifact of
+rewarding any early pick. It is not generic - WR lost clearly (-9.0 ± 2.6,
+t = -3.42), TE lost suggestively (-7.9 ± 3.7, t = -2.13), QB showed nothing
+(-2.2 ± 4.2). That two of three lose money is stronger evidence for Robust RB
+than a clean win alone would have been. `tests/hypotheses.py` reproduces all
+six comparisons.
 
 Two seasons is a thin basis and the season-to-season swing is large - `lineup`
 beat `vona` by 117 points in 2025 and lost to it by 34 in 2024.
