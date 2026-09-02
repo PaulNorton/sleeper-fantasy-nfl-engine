@@ -25,6 +25,13 @@ from .valuation import LineupEvaluator, Roster, add_to_roster, outcome_utility
 NORM = NormalDist()
 
 # Spread of a player's real draft slot around his ADP.
+#
+# Fitted over 60,000 simulated observations of "was he still there N picks
+# later". These values give the best Brier score (0.0967). Widening the spread
+# reduces a mild pessimism - the model predicts 81% survival where 85% is
+# observed at pick 16 - but makes the predictions less sharp and less accurate
+# overall (scale 0.38 gives near-zero bias but Brier 0.1004). The bias is the
+# price of sharpness and correcting it would be a downgrade.
 ADP_SIGMA_FLOOR = 4.0
 ADP_SIGMA_SCALE = 0.26
 

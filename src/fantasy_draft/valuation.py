@@ -17,11 +17,16 @@ from dataclasses import dataclass
 
 from .league import FLEX_MAP, LeagueSettings
 
-# Residual value of a backup once outcomes are simulated. This used to carry
-# all of a bench player's worth. It no longer does: when the simulation draws
-# realised seasons, a bench player who breaks out is seated in the lineup by
-# the optimiser, so his upside is already counted. What is left here is the
-# part season totals miss - bye-week fill-ins and mid-season streaming.
+# Residual value of a backup. This used to carry all of a bench player's worth
+# and no longer does, for two reasons: a bench player who breaks out is seated
+# in the lineup by the optimiser anyway, and every slot is floored at the waiver
+# wire, so depth you drafted competes with depth you could pick up for free.
+#
+# Swept against 2024 and 2025 over 60 paired drafts. Scaling these values by
+# zero is worth +2.2 +/- 4.1 points, by a half +2.5 +/- 2.7, by three
+# -5.1 +/- 3.1, by eight -13.6 +/- 5.3. So bench depth is close to worthless
+# and certainly not worth more than this; the shipped values sit at the flat
+# top of that curve.
 BENCH_FACTOR = {
     "QB": 0.04,
     "RB": 0.09,

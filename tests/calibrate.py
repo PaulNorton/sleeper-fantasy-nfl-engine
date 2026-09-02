@@ -8,6 +8,7 @@ projections.RELIABILITY, or to re-fit them once another season is in the books:
 
 import math
 import statistics
+import sys
 
 from fantasy_draft.backtest import load_actuals
 from fantasy_draft.league import LeagueSettings
@@ -81,5 +82,62 @@ def main() -> None:
     )
 
 
+def sweep() -> None:
+    """Re-derive the swept constants by replaying finished seasons.
+
+    Every configuration faces identical drafts, so differences are paired and a
+    few points of signal are visible against seasons that swing by hundreds.
+    Slow: each configuration replays 60 full drafts.
+    """
+    import math
+    import statistics
+
+    from fantasy_draft import projections, valuation
+    from fantasy_draft.backtest import prepare, run
+
+    with SleeperClient() as client:
+        league = LeagueSettings.from_api(client.league("YOUR_LEAGUE_ID"))
+        data = {s: prepare(client, league, s) for s in SEASONS}
+
+    def points() -> list[float]:
+        out: list[float] = []
+        for _season, (players, replacement, actual) in data.items():
+            res = run(
+                league, players, replacement, actual, reps=3,
+                slots=list(range(1, league.teams + 1)), strategies=("greedy",),
+            )
+            out.extend(res["greedy"].points)
+        return out
+
+    def against(reference: list[float]) -> tuple[float, float, float]:
+        current = points()
+        diffs = [a - b for a, b in zip(current, reference)]
+        mean = statistics.mean(diffs)
+        err = statistics.stdev(diffs) / math.sqrt(len(diffs))
+        return mean, err, (mean / err if err else 0.0)
+
+    reference = points()
+    print(f"\nreference: shipped constants, {len(reference)} paired drafts")
+
+    print(f"\nwaiver depth (rounds below the last starter)\n{'value':>8}{'diff':>8}{'+/-':>7}{'t':>7}")
+    for rounds in (0.0, 0.25, 1.0, 2.0):
+        projections.WAIVER_DEPTH_ROUNDS = rounds
+        m, e, t = against(reference)
+        print(f"{rounds:>8.2f}{m:>8.1f}{e:>7.1f}{t:>7.2f}")
+    projections.WAIVER_DEPTH_ROUNDS = 0.5
+
+    print(f"\nbench factor multiplier\n{'value':>8}{'diff':>8}{'+/-':>7}{'t':>7}")
+    original = dict(valuation.BENCH_FACTOR)
+    for mult in (0.0, 0.5, 3.0, 8.0):
+        valuation.BENCH_FACTOR.update({k: v * mult for k, v in original.items()})
+        m, e, t = against(reference)
+        print(f"{mult:>8.1f}{m:>8.1f}{e:>7.1f}{t:>7.2f}")
+    valuation.BENCH_FACTOR.update(original)
+
+
 if __name__ == "__main__":
     main()
+    if "--sweep" in sys.argv:
+        sweep()
+
+

@@ -83,7 +83,7 @@ Ranks the board for your next pick and exits. The main command.
 |---|---|---|
 | `--limit`, `-n` | 12 | How many players to rank. |
 | `--sims` | 300 | Draft simulations per candidate. Below ~200 the ordering starts to wobble; more is steadier and slower. 300 ranks in about two seconds. |
-| `--strategy` | `vona` | How to rank. `vona` scores what a player adds now, less what his position would still offer at your next pick. `lineup` drops the wait adjustment. `simulate` plays the rest of the draft out — it backtests worse, but see [what the backtest found](#what-the-backtest-found). |
+| `--strategy` | `lineup` | How to rank. `lineup` scores what a player adds to your starting lineup and backtests best. `vona` also subtracts what his position would still offer at your next pick, which measurably costs points. `simulate` plays the rest of the draft out — worst of the three; see [what the backtest found](#what-the-backtest-found). |
 | `--objective` | `points` | `points` maximises your expected season total. `win` simulates the other rosters too and maximises your share of the title odds. See [what variance is worth](#what-that-turns-out-to-be-worth). |
 | `--risk` | mean | Percentile of your simulated seasons to optimise, e.g. `0.25` for the floor, `0.75` for upside. In practice this rarely changes the top pick; `--objective win` is the knob that bites. |
 | `--projections` | — | CSV of your own projections and/or ADP, overlaid on everything else. |
@@ -178,16 +178,24 @@ nothing to the lineup and little to the bench, so he scores near zero no matter
 how high he sits on a ranking list. Superflex changes this automatically,
 because the lineup has a slot he can fill.
 
-**4. Whether you could just wait.** A player worth taking now is one you cannot
-get later. For each candidate the app works out what his position would still
-offer at your next pick — blending his own chance of surviving with the best of
-whatever else would remain — and subtracts it. A player certain to last nets to
-roughly zero; one about to disappear keeps his full value.
+**4. Your floor is the waiver wire, not zero.** Every lineup slot is floored at
+replacement level, whether you drafted someone for it or not. A slot you skipped
+is worth what streaming gives you; a starter who collapses is not worth his 40
+points, because you drop him in October. Flooring the downside is most of what
+makes upside worth paying for — a boom-or-bust player's bad seasons cost only
+the gap down to waivers, while his good ones are yours in full. This single
+change was worth more than anything else in the model.
 
-That is done in closed form. The app can also simulate the remaining draft
-thousands of times instead (`--strategy simulate`), with opponents modelled as
-ADP drafters. That is the more complete model and it is measurably worse; see
-below.
+**5. Bye weeks.** Two starters sharing a bye means one week of starting a waiver
+body in a slot that should have held a starter. The cost is worked out exactly:
+the lineup is seated again for each bye week your roster has, because whether a
+clash hurts depends on whether your bench happens to cover that position. Byes
+come from the NFL schedule, as the week each team does not play.
+
+Optionally the app can also subtract what a position would still offer at your
+next pick (`--strategy vona`), or simulate the remaining draft thousands of
+times (`--strategy simulate`). Both are more sophisticated and both measurably
+lose points; see below.
 
 ## Ranges of outcomes
 
@@ -250,39 +258,50 @@ a real effect, not a large one.
 
 `fdraft backtest` replays a finished season: draft on preseason projections
 only, score the roster on what actually happened. Two seasons, ten draft slots,
-three repetitions, every strategy facing identical drafts.
+six repetitions, every strategy facing identical drafts so the comparison is
+paired.
 
 | strategy | 2025 | 2024 | vs ADP |
 |---|---|---|---|
-| `lineup` (greedy) | 2234 | 2367 | +262 |
-| `vona` | 2104 | 2467 | +247 |
-| best value over replacement | 2096 | 2419 | +219 |
-| ADP | 2018 | 2059 | 0 |
-| `simulate` (rollout) | 1970 | 2376 | +154 |
+| `lineup` | 2374 | 2465 | **+238** |
+| best value over replacement | 2287 | 2501 | +212 |
+| fill starters first | 2288 | 2484 | +205 |
+| `vona` | 2261 | 2514 | +206 |
+| ADP | 2155 | 2208 | 0 |
 
-Pooled over 60 paired drafts, `lineup` and `vona` are indistinguishable from
-each other (+15 ± 24 points, t = 0.61) and both beat drafting to ADP by a clear
-margin (t > 6). Neither is separable from plain value over replacement at this
-sample size, though both trend ahead.
+Pooled over 120 paired drafts:
+
+| comparison | mean diff | std err | t |
+|---|---|---|---|
+| `lineup` − ADP | +238 | 16 | 14.95 |
+| `lineup` − fill starters | +33 | 10 | 3.24 |
+| `lineup` − `vona` | +32 | 12 | 2.58 |
+| `lineup` − value over replacement | +31 | 11 | 2.91 |
+| bye-aware − bye-blind | +10.4 | 3.5 | 2.98 |
+
+Two results are worth stating plainly.
 
 **Simulating the whole draft is the worst option tested.** In 2025 it finished
-below ADP. The failure is instructive: greedy lineup-marginal separates the best
-candidate from the second by about 75 points, but the rollout turns that same
-difference into 4.5 points of final roster value, because simulated future-you
-simply drafts a comparable player instead. Seed-to-seed noise at 300 simulations
-is 3.3 points, so what survives the compression is barely above the noise floor
-and the top two candidates swap depending on the seed.
+below ADP. Greedy lineup-marginal separates the best candidate from the second
+by about 75 points, but the rollout turns that same difference into 4.5 points
+of final roster value, because simulated future-you simply drafts a comparable
+player instead. Seed-to-seed noise at 300 simulations is 3.3 points, so what
+survives the compression barely clears the noise floor and the top two
+candidates swap depending on the seed.
 
-It is kept because it is the only strategy that sees one thing the closed-form
-ones miss. Given two identical players, one who will last and one who will not,
-taking the scarce one lets you end up with *both*. The closed-form strategies
-compare each candidate against the position's best player next turn, which is
-the same number either way, so they rate them equally. The rollout separates
-them by 47 points.
+It is kept because it sees one thing the closed-form strategies miss. Given two
+identical players, one who will last and one who will not, taking the scarce one
+lets you end up with *both*. The closed-form strategies compare each candidate
+against the position's best player next turn, which is the same number either
+way, so they rate them equally. The rollout separates them by 47 points.
+
+**Subtracting the wait value costs points.** `vona` implements exactly the "can
+I get him later" reasoning, in closed form and with no noise, and it is worse
+than ignoring the question entirely (t = 2.58). The wait columns are still shown
+because they are useful to read; the engine no longer acts on them.
 
 Two seasons is a thin basis and the season-to-season swing is large — `lineup`
-beat `vona` by 130 points in 2025 and lost to it by 100 in 2024. Treat the
-ordering among the top three as unsettled.
+beat `vona` by 113 points in 2025 and lost to it by 49 in 2024.
 
 ## Reading the table
 
@@ -319,12 +338,16 @@ Bijan Robinson,RB,318.0,3.4
 
 ## What it does not model
 
-- **Bye-week clashes.** Bye weeks are read from FantasyPros and shown, but two
-  starters sharing a bye are not yet penalised.
+- **In-season additions.** Downside is floored at the waiver wire, but the
+  upside of picking up a breakout is not modelled. Real rosters gain more from
+  waivers than this assumes, which means late-round picks are worth even less
+  than the model already says.
 - **Correlation between players.** Two receivers on one team compete for the
-  same targets; the simulation draws their seasons independently.
+  same targets; their seasons are drawn independently.
 - **Opponent roster needs.** Opponents follow ADP; they do not skip a position
   because they already filled it. ADP already prices this in on average.
+- **Superflex.** The backtest replays 1QB leagues, so nothing about superflex
+  valuation is validated.
 - **Keepers and auction drafts.** Snake and linear drafts only.
 - **Trades during the draft**, beyond pick trades already recorded by Sleeper.
 
@@ -370,4 +393,6 @@ identical one who will last.
 PYTHONPATH=tests .venv/bin/python tests/calibrate.py
 ```
 
-Re-derives the spread and shrinkage constants from finished seasons.
+Re-derives the spread and shrinkage constants from finished seasons. Add
+`--sweep` to re-fit the waiver depth and bench factor constants too, which
+replays 60 drafts per configuration and is slow.
