@@ -113,11 +113,31 @@ bye. No roster logic, no simulation.
 | `--pos`, `-p` | all | Filter to one position, e.g. `RB`. |
 | `--limit`, `-n` | 25 | How many players to list. |
 
+### `fdraft backtest`
+
+Replays a finished season to see how the engine would have drafted. Teams draft
+knowing only that season's preseason projections and ADP; rosters are then
+scored on what actually happened. Every strategy faces identical drafts, so only
+the focal seat's choices differ.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--season` | 2025 | A finished season to replay. |
+| `--reps` | 3 | Repetitions per draft slot. More reps, less noise. |
+| `--slots` | all | Comma-separated draft slots to test, e.g. `1,5,10`. |
+| `--sims` | 120 | Simulations per pick while drafting. Lower than live use, since a backtest makes thousands of picks. |
+| `--rounds` | 15 | Rounds per draft. |
+| `--opponent` | `adp` | What the other nine seats do: `adp`, `vor` or `need`. |
+
+Scoring rules come from your saved league, so a backtest measures the engine in
+*your* format. It needs `--league-id` if you have not run `setup`.
+
 ```bash
 fdraft watch                          # follow the draft live
 fdraft board --objective win -n 20    # rank by title odds
 fdraft available -p RB -n 30          # who is left at running back
 fdraft board --league-id 1397…        # your other league
+fdraft backtest --season 2025         # how would it have drafted last year
 ```
 
 ## How a pick is scored
