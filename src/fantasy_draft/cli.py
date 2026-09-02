@@ -57,7 +57,7 @@ D = typer.Option(None, "--draft-id", "-d", help="Sleeper draft id (works for moc
 S = typer.Option(None, "--season", help="Season, e.g. 2026.")
 SL = typer.Option(None, "--slot", help="Your draft slot, if it cannot be detected.")
 OV = typer.Option(None, "--projections", help="CSV of your own projections/ADP to overlay.")
-SIM = typer.Option(150, "--sims", help="Draft simulations per candidate. More is steadier, slower.")
+SIM = typer.Option(300, "--sims", help="Draft simulations per candidate. More is steadier, slower.")
 RISK = typer.Option(
     None, "--risk",
     help="Percentile of your simulated seasons to optimise: 0.25 protects the floor, "
@@ -221,10 +221,13 @@ def roster(
     draft_id: Optional[str] = D,
     season: Optional[str] = S,
     slot: Optional[int] = SL,
+    projections: Optional[str] = OV,
+    no_consensus: bool = NOFP,
 ) -> None:
     """Show your drafted roster and which starter slots are still open."""
     with SleeperClient() as client:
-        session = _session(client, username, league_id, draft_id, season, slot)
+        session = _session(client, username, league_id, draft_id, season, slot,
+                           projections, not no_consensus)
         console.print(ui.roster_panel(session.league, session.my_players()))
 
 
@@ -236,16 +239,20 @@ def available(
     draft_id: Optional[str] = D,
     season: Optional[str] = S,
     slot: Optional[int] = SL,
-    limit: int = typer.Option(25, "--limit", "-n"),
+    projections: Optional[str] = OV,
+    no_consensus: bool = NOFP,
+    limit: int = typer.Option(25, "--limit", "-n", help="How many players to list."),
 ) -> None:
     """List the best players still on the board, by raw value."""
     with SleeperClient() as client:
-        session = _session(client, username, league_id, draft_id, season, slot)
+        session = _session(client, username, league_id, draft_id, season, slot,
+                           projections, not no_consensus)
         pool = session.available()
         if position:
             pool = [p for p in pool if p.position == position.upper()]
         pool.sort(key=lambda p: -p.vorp)
-        table = Table("Player", "Pos", "Tm", "Proj", "VOR", "ADP", title="On the board")
+        table = Table("Player", "Pos", "Tm", "Proj", "VOR", "Floor", "Ceil", "ADP", "Bye",
+                      title="On the board")
         for p in pool[:limit]:
             table.add_row(
                 p.label,
@@ -253,7 +260,10 @@ def available(
                 p.team or "FA",
                 f"{p.points:.0f}",
                 f"{p.vorp:+.0f}",
+                f"{p.floor:.0f}",
+                f"{p.ceiling:.0f}",
                 "—" if p.adp >= 999 else f"{p.adp:.0f}",
+                str(p.bye or "—"),
             )
         console.print(table)
 
