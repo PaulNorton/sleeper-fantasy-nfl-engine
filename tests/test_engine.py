@@ -192,3 +192,31 @@ assert abs(gaps["vona"]) < 5.0, (
     "and _direct_scores comments need updating"
 )
 print("PASS: the rollout separates them; the closed-form strategies do not, as documented")
+
+# 10 - the compare view: builds cleanly on agreement, and reports a real split
+# rather than papering over one. Reuses state9's forced ADP-20-vs-55 pair,
+# where strategies are known to disagree (check 9, above).
+from fantasy_draft import ui as _ui
+
+state10 = make_state()
+agree = {
+    strat: recommend(league, state10, players, replacement, 1, [1, 24, 25, 48, 49, 72],
+                     cfg=RolloutConfig(sims=200, strategy=strat))
+    for strat in ("lineup", "vona", "simulate")
+}
+table, strategies = _ui.compare_table(agree, limit=8)
+verdict = _ui.compare_verdict(agree)
+assert strategies == ["lineup", "vona", "simulate"]
+assert "AGREE" in verdict.plain, "all three should open on the same player at pick 1.01"
+print(f"\ncompare at pick 1.01: {verdict.plain}")
+print("PASS: compare view renders and reports agreement")
+
+split = {
+    strat: recommend(league, state9, players, replacement, 1, [20, 45, 52, 69, 76],
+                     cfg=RolloutConfig(sims=200, strategy=strat))
+    for strat in ("lineup", "vona", "simulate")
+}
+verdict2 = _ui.compare_verdict(split)
+assert "SPLIT" in verdict2.plain, "simulate ranks the scarce player above lineup/vona here"
+print(f"compare on a known split: {verdict2.plain.splitlines()[0]}")
+print("PASS: compare view reports a real disagreement rather than hiding it")

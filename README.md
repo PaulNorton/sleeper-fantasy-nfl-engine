@@ -100,6 +100,24 @@ The same board, refreshed as the draft happens. Takes every `board` flag plus:
 Safe to start before the draft opens: it re-reads the pick order every poll, so
 it picks up a randomised order at kickoff.
 
+### `fdraft compare`
+
+Ranks the board under all three strategies (`lineup`, `vona`, `simulate`) side
+by side, for a second opinion at the moment of your actual pick.
+
+`lineup` backtests clearly best over 2024-25 - see
+[what the backtest found](#what-the-backtest-found) - and is what `board` and
+`watch` act on. This command doesn't change that; it's for checking whether the
+strategies agree. Agreement across all three is a confidence signal. A split is
+worth a second look before you lock in `lineup`'s pick.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--limit`, `-n` | 8 | How many picks to show per strategy. |
+| `--sims` | 300 | Simulations for the `simulate` column only; the other two are closed form. |
+
+Takes the same `--projections` and `--no-consensus` flags as `board`.
+
 ### `fdraft roster`
 
 Your drafted players seated into starter slots, and which slots are still open.
@@ -138,6 +156,7 @@ fdraft watch                          # follow the draft live
 fdraft board --objective win -n 20    # rank by title odds
 fdraft available -p RB -n 30          # who is left at running back
 fdraft board --league-id 1397…        # your other league
+fdraft compare                        # do the strategies agree on your pick?
 fdraft backtest --season 2025         # how would it have drafted last year
 ```
 

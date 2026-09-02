@@ -189,6 +189,52 @@ def board(
 
 
 @app.command()
+def compare(
+    username: Optional[str] = U,
+    league_id: Optional[str] = L,
+    draft_id: Optional[str] = D,
+    season: Optional[str] = S,
+    slot: Optional[int] = SL,
+    projections: Optional[str] = OV,
+    sims: int = SIM,
+    no_consensus: bool = NOFP,
+    limit: int = typer.Option(8, "--limit", "-n", help="How many picks to show per strategy."),
+) -> None:
+    """Rank the board under every strategy side by side, for a second opinion.
+
+    lineup backtests clearly best over 2024-25 (see README) and is what board
+    and watch act on. This is for checking whether the strategies agree at the
+    moment of your actual pick, not for picking a different default.
+    """
+    with SleeperClient() as client:
+        session = _session(client, username, league_id, draft_id, season, slot,
+                           projections, not no_consensus)
+        picks = session.my_picks(limit=8)
+        results = {}
+        for strat in ("lineup", "vona", "simulate"):
+            results[strat] = recommend(
+                session.league, session.state, session.players, session.replacement,
+                session.my_roster_id, picks, limit=limit,
+                cfg=RolloutConfig(sims=sims, strategy=strat),
+            )
+        table, strategies = ui.compare_table(results, limit)
+        on_clock = session.on_clock()
+        my_next = picks[0] if picks else None
+        console.print(ui.header(session.league, session.state, my_next, on_clock))
+        console.print()
+        console.print(ui.compare_verdict(results))
+        console.print()
+        console.print(table)
+        console.print(
+            Text(
+                "Each column shows rank and points behind that strategy's own top pick. "
+                "Simulate is noisier than the other two; raise --sims if it looks unstable.",
+                style="dim",
+            )
+        )
+
+
+@app.command()
 def watch(
     username: Optional[str] = U,
     league_id: Optional[str] = L,

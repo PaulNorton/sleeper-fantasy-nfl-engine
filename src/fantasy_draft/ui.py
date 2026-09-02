@@ -186,6 +186,89 @@ def recent_panel(state: DraftState, by_id: dict[str, Player], names: dict[int, s
     return Panel(table, title="Recent picks", border_style="grey50")
 
 
+STRATEGY_LABEL = {"lineup": "Lineup", "vona": "Vona", "simulate": "Simulate"}
+
+
+def compare_table(
+    results: dict[str, list[Recommendation]], limit: int
+) -> tuple[Table, list[str]]:
+    """One row per candidate, one column per strategy showing its rank there.
+
+    Rows are the union of each strategy's top `limit` picks, ordered by the
+    default (lineup) strategy's ranking first, with anyone another strategy
+    would have taken instead appended below.
+    """
+    strategies = [s for s in ("lineup", "vona", "simulate") if s in results]
+    ranks: dict[str, dict[str, tuple[int, Recommendation]]] = {}
+    for strat in strategies:
+        ranks[strat] = {
+            r.player.player_id: (i + 1, r) for i, r in enumerate(results[strat])
+        }
+
+    order: list[str] = []
+    seen: set[str] = set()
+    primary = strategies[0]
+    for r in results[primary][:limit]:
+        if r.player.player_id not in seen:
+            order.append(r.player.player_id)
+            seen.add(r.player.player_id)
+    for strat in strategies[1:]:
+        for r in results[strat][:limit]:
+            if r.player.player_id not in seen:
+                order.append(r.player.player_id)
+                seen.add(r.player.player_id)
+
+    table = Table(header_style="bold", pad_edge=False, padding=(0, 1))
+    table.add_column("Player", min_width=18, no_wrap=True)
+    table.add_column("Pos", width=5)
+    table.add_column("Proj", width=5, justify="right")
+    for strat in strategies:
+        table.add_column(STRATEGY_LABEL.get(strat, strat), width=10, justify="center")
+
+    by_id: dict[str, Player] = {}
+    for strat in strategies:
+        for r in results[strat]:
+            by_id.setdefault(r.player.player_id, r.player)
+
+    for pid in order:
+        p = by_id[pid]
+        row = [Text(p.label, style="bold"), pos_text(f"{p.position}{p.pos_rank}"), f"{p.points:.0f}"]
+        for strat in strategies:
+            entry = ranks[strat].get(pid)
+            if entry is None:
+                row.append(Text("—", style="grey37"))
+                continue
+            rank, r = entry
+            best = ranks[strat][results[strat][0].player.player_id][1].score
+            cost = "best" if rank == 1 else fmt_score(r.score - best)
+            row.append(Text(f"#{rank} {cost}", style="green" if rank == 1 else ""))
+        table.add_row(*row)
+    return table, strategies
+
+
+def compare_verdict(results: dict[str, list[Recommendation]]) -> Text:
+    strategies = [s for s in ("lineup", "vona", "simulate") if s in results and results[s]]
+    tops = {s: results[s][0].player for s in strategies}
+    names = {p.player_id: p for p in tops.values()}
+    text = Text()
+    if len(names) == 1:
+        p = next(iter(names.values()))
+        text.append("AGREE: ", style="bold green")
+        text.append(f"every strategy takes {p.name} ({p.position}, {p.team or 'FA'})")
+    else:
+        text.append("SPLIT: ", style="bold yellow")
+        text.append(
+            ", ".join(f"{STRATEGY_LABEL.get(s, s)} wants {p.name}" for s, p in tops.items())
+        )
+        text.append("\n")
+        text.append(
+            "lineup backtests best on 2024-25 (see README); defaulting to it is the "
+            "safer read, but a split like this is worth a second look.",
+            style="dim",
+        )
+    return text
+
+
 def build_screen(
     league: LeagueSettings,
     state: DraftState,
