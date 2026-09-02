@@ -161,7 +161,7 @@ def rollout(
     order: list[int],
     players: list[Player],
     evaluator: LineupEvaluator,
-    base_entries: list[tuple[str, float, float]],
+    base_entries: list[tuple[str, float, float, int]],
     base_roster: Roster,
     my_picks: list[int],
     board_pick: int,
@@ -207,19 +207,22 @@ def rollout(
             choice = None
             for idx in _best_candidates(order, ptr, taken, players, cfg):
                 p = players[idx]
-                gain = evaluator.marginal(roster, p.position, p.value, base)
+                gain = evaluator.marginal(roster, p.position, p.value, base, p.bye or 0)
                 if best_gain is None or gain > best_gain:
                     best_gain = gain
                     choice = idx
             if choice is None:
                 break
         p = players[choice]
-        roster = add_to_roster(roster, p.position, p.value)
+        roster = add_to_roster(roster, p.position, p.value, p.bye or 0)
         picked.append(choice)
         taken.add(choice)
 
     entries = list(base_entries)
-    entries += [(players[i].position, players[i].value, realised[i]) for i in picked]
+    entries += [
+        (players[i].position, players[i].value, realised[i], players[i].bye or 0)
+        for i in picked
+    ]
     return outcome_utility(evaluator, entries)
 
 
@@ -254,7 +257,7 @@ def score_candidates(
     base_seasons = realisation_matrix(base_players, cfg, stream=1)
     base_roster: Roster = {}
     for p in base_players:
-        base_roster = add_to_roster(base_roster, p.position, p.value)
+        base_roster = add_to_roster(base_roster, p.position, p.value, p.bye or 0)
 
     beating_field = (
         cfg.objective == "win"
@@ -271,12 +274,13 @@ def score_candidates(
     field: list[list[float]] = []
     for s, order in enumerate(scenarios):
         base_entries = [
-            (p.position, p.value, base_seasons[s][k]) for k, p in enumerate(base_players)
+            (p.position, p.value, base_seasons[s][k], p.bye or 0)
+            for k, p in enumerate(base_players)
         ]
         if beating_field:
             opp_entries = {
                 owner: [
-                    (p.position, p.value, opponent_seasons[owner][s][k])
+                    (p.position, p.value, opponent_seasons[owner][s][k], p.bye or 0)
                     for k, p in enumerate(roster)
                 ]
                 for owner, roster in opponent_bases.items()
@@ -314,7 +318,7 @@ def field_utilities(
     players: list[Player],
     evaluator: LineupEvaluator,
     owner_by_pick: dict[int, int],
-    base_entries: dict[int, list[tuple[str, float, float]]],
+    base_entries: dict[int, list[tuple[str, float, float, int]]],
     my_owner: int,
     my_picks: list[int],
     board_pick: int,
@@ -333,7 +337,7 @@ def field_utilities(
     take barely changes what nine opponents end up with, and pretending it does
     not lets the whole objective come almost free.
     """
-    rosters: dict[int, list[tuple[str, float, float]]] = {
+    rosters: dict[int, list[tuple[str, float, float, int]]] = {
         owner: list(entries) for owner, entries in base_entries.items() if owner != my_owner
     }
     if not rosters:
@@ -355,7 +359,7 @@ def field_utilities(
         if owner is None or owner == my_owner or owner not in rosters:
             continue
         p = players[idx]
-        rosters[owner].append((p.position, p.value, realised[idx]))
+        rosters[owner].append((p.position, p.value, realised[idx], p.bye or 0))
 
     return [outcome_utility(evaluator, entries) for entries in rosters.values()]
 

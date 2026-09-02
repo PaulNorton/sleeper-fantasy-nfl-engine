@@ -47,7 +47,7 @@ _pool_cache: dict[str, list[Player]] = {}
 # Stops a baseline drafting fifteen running backs.
 CAPS = {"QB": 2, "RB": 6, "WR": 6, "TE": 2, "K": 1, "DEF": 1}
 
-STRATEGIES = ("engine", "greedy", "vona", "adp", "vor", "need")
+STRATEGIES = ("engine", "greedy", "blind", "vona", "adp", "vor", "need")
 
 
 @dataclass
@@ -162,7 +162,7 @@ def baseline_pick(
     if not legal:
         return None
 
-    if team.strategy in ("greedy", "vona"):
+    if team.strategy in ("greedy", "blind", "vona"):
         # The engine's lineup model with no simulation: take whoever adds most to
         # the starting lineup right now. Isolates what the rollout is worth.
         evaluator = LineupEvaluator.from_league(
@@ -170,12 +170,19 @@ def baseline_pick(
         )
         roster: dict[str, list[float]] = {}
         for p in team.players:
-            roster = add_to_roster(roster, p.position, p.value)
+            roster = add_to_roster(
+                roster, p.position, p.value, 0 if team.strategy == "blind" else (p.bye or 0)
+            )
         base = evaluator.utility(roster)
-        if team.strategy == "greedy":
+        if team.strategy in ("greedy", "blind"):
+            # "blind" drafts ignoring bye weeks; it is scored with the same bye
+            # penalty as everyone else, so the pair measures what byes are worth.
+            blind = team.strategy == "blind"
             return max(
                 legal[:60],
-                key=lambda p: evaluator.marginal(roster, p.position, p.value, base),
+                key=lambda p: evaluator.marginal(
+                    roster, p.position, p.value, base, 0 if blind else (p.bye or 0)
+                ),
             )
         # vona: exactly what recommend._direct_scores does, so the backtest
         # measures the strategy that actually ships.
@@ -185,7 +192,7 @@ def baseline_pick(
         can_wait = next_pick > pick_no
 
         def score(p: Player) -> float:
-            now = evaluator.marginal(roster, p.position, p.value, base)
+            now = evaluator.marginal(roster, p.position, p.value, base, p.bye or 0)
             if not can_wait:
                 return now
             survives = availability(p, next_pick, pick_no)
@@ -193,7 +200,9 @@ def baseline_pick(
                 by_pos.get(p.position, []), next_pick, pick_no, skip=p.player_id
             )
             alternative = survives * p.value + (1.0 - survives) * others
-            return now - evaluator.marginal(roster, p.position, alternative, base)
+            return now - evaluator.marginal(
+                roster, p.position, alternative, base, p.bye or 0
+            )
 
         return max(legal[:60], key=score)
     if team.strategy == "adp":
@@ -306,17 +315,21 @@ def score_team(
     """Points the roster really produced: as seated in hindsight, as projected, blended."""
     by_realised: dict[str, list[tuple[float, float]]] = {}
     by_projection: dict[str, list[tuple[float, float]]] = {}
+    bye_roster: dict[str, list[tuple[float, int]]] = {}
     for p in team.players:
         got = actual.get(p.player_id, 0.0)
         by_realised.setdefault(p.position, []).append((got, got))
         by_projection.setdefault(p.position, []).append((p.value, got))
+        bye_roster = add_to_roster(bye_roster, p.position, got, p.bye or 0)
     for pool in by_realised.values():
         pool.sort(key=lambda e: -e[0])
     for pool in by_projection.values():
         pool.sort(key=lambda e: -e[0])
     informed, _ = evaluator.seat(by_realised)
     naive, _ = evaluator.seat(by_projection)
-    return informed, naive, HINDSIGHT * informed + (1 - HINDSIGHT) * naive
+    penalty = evaluator.bye_penalty(bye_roster, informed)
+    blended = HINDSIGHT * informed + (1 - HINDSIGHT) * naive + penalty
+    return informed, naive, blended
 
 
 @dataclass

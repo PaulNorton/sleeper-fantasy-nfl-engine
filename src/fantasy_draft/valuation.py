@@ -59,18 +59,23 @@ def injury_multiplier(status: str | None) -> float:
     return INJURY_DISCOUNT.get(status, 0.95)
 
 
-Roster = dict[str, list[float]]  # position -> points, descending
+# position -> [(-points, bye week)], sorted so the best player comes first.
+Roster = dict[str, list[tuple[float, int]]]
+
+# Games in a season. A bye costs you one week of one starter, so the penalty for
+# a clash is scaled by this.
+SEASON_WEEKS = 17
 
 
 def empty_roster() -> Roster:
     return {}
 
 
-def add_to_roster(roster: Roster, pos: str, points: float) -> Roster:
+def add_to_roster(roster: Roster, pos: str, points: float, bye: int = 0) -> Roster:
     """Return a shallow copy with one player added, keeping lists sorted."""
     new = dict(roster)
     lst = list(new.get(pos, ()))
-    insort(lst, -points)
+    insort(lst, (-points, bye))
     new[pos] = lst
     return new
 
@@ -148,28 +153,41 @@ class LineupEvaluator:
                 used[best_pos] = used.get(best_pos, 0) + 1
         return total, used
 
-    def starter_points(self, roster: Roster) -> tuple[float, dict[str, int]]:
-        """Optimal starting lineup total, plus how many of each position it used."""
+    def starter_points(
+        self, roster: Roster, skip_bye: int = 0
+    ) -> tuple[float, dict[str, int]]:
+        """Optimal starting lineup total, plus how many of each position it used.
+
+        `skip_bye` leaves out everyone on that bye week, which is how the bye
+        penalty is worked out: seat the lineup again without them and see what
+        the week costs.
+        """
         used: dict[str, int] = {}
         total = 0.0
         for pos, count in self.dedicated.items():
             lst = roster.get(pos) or []
+            if skip_bye:
+                lst = [e for e in lst if e[1] != skip_bye]
             floor = self.replacement.get(pos, 0.0)
             take = min(count, len(lst))
-            total += sum(max(-v, floor) for v in lst[:take])  # stored negated
+            total += sum(max(-v, floor) for v, _b in lst[:take])  # stored negated
             total += (count - take) * floor
             used[pos] = take
+        pools = {
+            pos: ([e for e in lst if e[1] != skip_bye] if skip_bye else lst)
+            for pos, lst in roster.items()
+        }
         for _slot, count, eligible in self.flex:
             for _ in range(count):
                 best_pos = None
                 best_val = 0.0
                 for pos in eligible:
-                    lst = roster.get(pos)
+                    lst = pools.get(pos)
                     if not lst:
                         continue
                     i = used.get(pos, 0)
-                    if i < len(lst) and -lst[i] > best_val:
-                        best_val = -lst[i]
+                    if i < len(lst) and -lst[i][0] > best_val:
+                        best_val = -lst[i][0]
                         best_pos = pos
                 floor = max(
                     (self.replacement.get(pos, 0.0) for pos in eligible), default=0.0
@@ -189,33 +207,61 @@ class LineupEvaluator:
             if not factor:
                 continue
             floor = self.replacement.get(pos, 0.0)
-            for value in lst[used.get(pos, 0) :]:
+            for value, _bye in lst[used.get(pos, 0) :]:
                 gain = -value - floor
                 if gain > 0:
                     total += factor * gain
         return total
 
-    def utility(self, roster: Roster) -> float:
-        total, used = self.starter_points(roster)
-        return total + self.bench_value(roster, used)
+    def bye_penalty(self, roster: Roster, full: float) -> float:
+        """What sharing bye weeks costs you over a season.
 
-    def marginal(self, roster: Roster, pos: str, points: float, base: float | None = None) -> float:
+        Two starters on the same bye means one week of starting a waiver body in
+        a slot that should have held a starter. The cost is worked out exactly -
+        the lineup is seated again for each bye week your roster actually has -
+        rather than by a rule of thumb, because whether it hurts depends on
+        whether your bench happens to cover that position.
+        """
+        weeks = {bye for lst in roster.values() for _v, bye in lst if bye}
+        if not weeks:
+            return 0.0
+        penalty = 0.0
+        for week in weeks:
+            without, _ = self.starter_points(roster, skip_bye=week)
+            penalty += (without - full) / SEASON_WEEKS
+        return penalty
+
+    def utility(self, roster: Roster, byes: bool = True) -> float:
+        total, used = self.starter_points(roster)
+        value = total + self.bench_value(roster, used)
+        if byes:
+            value += self.bye_penalty(roster, total)
+        return value
+
+    def marginal(
+        self,
+        roster: Roster,
+        pos: str,
+        points: float,
+        base: float | None = None,
+        bye: int = 0,
+    ) -> float:
         """Utility gained by adding one player. `base` avoids recomputing utility(roster)."""
         if base is None:
             base = self.utility(roster)
-        return self.utility(add_to_roster(roster, pos, points)) - base
+        return self.utility(add_to_roster(roster, pos, points, bye)) - base
 
 
 def roster_from_players(players) -> Roster:
     roster: Roster = {}
     for p in players:
-        roster = add_to_roster(roster, p.position, p.value)
+        roster = add_to_roster(roster, p.position, p.value, p.bye or 0)
     return roster
 
 
 def outcome_utility(
     evaluator: LineupEvaluator,
-    entries: list[tuple[str, float, float]],
+    entries: list[tuple[str, float, float, int]],
     hindsight: float = HINDSIGHT,
 ) -> float:
     """Score a finished roster of (position, projection, realised season) players.
@@ -227,9 +273,11 @@ def outcome_utility(
     """
     by_realised: dict[str, list[tuple[float, float]]] = {}
     by_projection: dict[str, list[tuple[float, float]]] = {}
-    for pos, projection, realised in entries:
+    bye_roster: Roster = {}
+    for pos, projection, realised, bye in entries:
         by_realised.setdefault(pos, []).append((realised, realised))
         by_projection.setdefault(pos, []).append((projection, realised))
+        bye_roster = add_to_roster(bye_roster, pos, realised, bye)
     for pool in by_realised.values():
         pool.sort(key=lambda e: -e[0])
     for pool in by_projection.values():
@@ -238,6 +286,7 @@ def outcome_utility(
     informed, used = evaluator.seat(by_realised)
     naive, _ = evaluator.seat(by_projection)
     total = hindsight * informed + (1.0 - hindsight) * naive
+    total += evaluator.bye_penalty(bye_roster, informed)
 
     for pos, pool in by_realised.items():
         factor = BENCH_FACTOR.get(pos, 0.05)

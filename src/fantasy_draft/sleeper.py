@@ -110,6 +110,10 @@ class SleeperClient:
         ]
         return self._get(f"{V2}/projections/nfl/{season}", params=params, ttl=ttl) or []
 
+    def schedule(self, season: str, ttl: float = 604800) -> list[dict]:
+        """Every regular season game. Used to work out bye weeks."""
+        return self._get(f"{V2}/schedule/nfl/regular/{season}", ttl=ttl) or []
+
     def stats(self, season: str, position: str, ttl: float = 604800) -> list[dict]:
         """Actual season stat lines. Finished seasons never change, so cache hard."""
         params = [

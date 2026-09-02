@@ -90,7 +90,7 @@ def _shortlist(
     """Cheap prescreen so the simulator only rates plausible picks."""
     base = evaluator.utility(roster)
     scored = [
-        (i, evaluator.marginal(roster, p.position, p.value, base), p.vorp)
+        (i, evaluator.marginal(roster, p.position, p.value, base, p.bye or 0), p.vorp)
         for i, p in enumerate(available)
     ]
     by_lineup = [i for i, _, _ in sorted(scored, key=lambda t: -t[1])[:width]]
@@ -215,7 +215,7 @@ def _direct_scores(
     scores: dict[int, float] = {}
     can_wait = following > current
     for i, p in enumerate(available):
-        now = evaluator.marginal(roster, p.position, p.value, base_util)
+        now = evaluator.marginal(roster, p.position, p.value, base_util, p.bye or 0)
         if strategy == "vona" and can_wait:
             survives = availability(p, following, current)
             others = expected_best_value(
@@ -223,7 +223,7 @@ def _direct_scores(
             )
             # If he is certain to last, waiting costs nothing and this nets to zero.
             alternative = survives * p.value + (1.0 - survives) * others
-            now -= evaluator.marginal(roster, p.position, alternative, base_util)
+            now -= evaluator.marginal(roster, p.position, alternative, base_util, p.bye or 0)
         scores[i] = now
     return scores
 
@@ -261,7 +261,7 @@ def _build(
                 edge=score - best_alt[idx],
                 vor=round(p.vorp, 1),
                 lineup_gain=round(
-                    evaluator.marginal(roster, p.position, p.value, base_util), 1
+                    evaluator.marginal(roster, p.position, p.value, base_util, p.bye or 0), 1
                 ),
                 wait_cost=round(max(0.0, p.value - wait_value.get(p.position, 0.0)), 1),
                 avail_next=availability(p, following, current),

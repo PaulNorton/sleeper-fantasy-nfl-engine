@@ -145,6 +145,33 @@ def _fallback_points(stats: dict[str, float], fmt: str) -> float:
     return float(stats.get(f"pts_{fmt}", 0.0) or 0.0)
 
 
+def bye_weeks(schedule: list[dict]) -> dict[str, int]:
+    """Each team's bye, derived from the weeks it does not play.
+
+    Taken from the schedule rather than from FantasyPros, which only publishes
+    the current season. This works for any year, so byes are available when
+    backtesting too.
+    """
+    played: dict[str, set[int]] = {}
+    weeks: set[int] = set()
+    for game in schedule:
+        try:
+            week = int(game.get("week"))
+        except (TypeError, ValueError):
+            continue
+        weeks.add(week)
+        for side in ("home", "away"):
+            team = game.get(side)
+            if team:
+                played.setdefault(str(team), set()).add(week)
+    byes: dict[str, int] = {}
+    for team, seen in played.items():
+        missing = sorted(weeks - seen)
+        if len(missing) == 1:
+            byes[team] = missing[0]
+    return byes
+
+
 def load_players(
     client: SleeperClient, league: LeagueSettings, season: str
 ) -> list[Player]:
@@ -152,6 +179,7 @@ def load_players(
     scoring = league.scoring_settings
     adp_key = league.adp_key
     fmt = league.scoring_format
+    byes = bye_weeks(client.schedule(season))
     players: list[Player] = []
 
     for pos in league.needed_positions:
@@ -179,6 +207,7 @@ def load_players(
                     team=row.get("team") or info.get("team"),
                     points=round(points, 1),
                     adp=adp,
+                    bye=byes.get(str(row.get("team") or info.get("team") or "")),
                     injury_status=info.get("injury_status"),
                     years_exp=info.get("years_exp"),
                     stats=stats,
@@ -385,7 +414,7 @@ def apply_consensus(
             continue
         target.ecr = r.ecr
         target.rank_std = r.rank_std
-        target.bye = r.bye
+        target.bye = target.bye or r.bye
         target.positional_rank_std = r.rank_std * density.get(r.position, 0.2)
         matched += 1
 
