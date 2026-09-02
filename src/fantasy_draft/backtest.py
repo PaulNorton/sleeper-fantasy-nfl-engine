@@ -394,6 +394,15 @@ def prepare(
     client: SleeperClient, league: LeagueSettings, season: str
 ) -> tuple[list[Player], dict[str, float], dict[str, float]]:
     players = load_players(client, league, season)
+    # Sleeper's player metadata is live, not historical: it carries whatever
+    # injury tag that player has *today*, regardless of which season is being
+    # replayed. Applying it to a past season is look-ahead bias - a player on
+    # injured reserve right now would get discounted for a season in which he
+    # was healthy on draft day. There is no historical injury feed to replace
+    # it with, so the honest choice is to drop it rather than use wrong
+    # information.
+    for p in players:
+        p.injury_status = None
     replacement = replacement_levels(players, league.replacement_ranks())
     apply_reliability(players, replacement)
     attach_risk(players)
