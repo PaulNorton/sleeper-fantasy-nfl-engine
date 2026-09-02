@@ -33,6 +33,14 @@ class Recommendation:
     reason: str
 
 
+# "Robust RB": prioritise running backs in the first few rounds beyond what
+# their raw marginal value implies. Conventional fantasy wisdom, tested rather
+# than assumed - see tests/hypotheses.py. Confirmed over 280 paired backtested
+# drafts (2024 and 2025): +3.1 +/- 1.1 points per draft, t = 2.79.
+ROBUST_RB_ROUNDS = 4
+ROBUST_RB_BONUS = 0.15
+
+
 def assign_tiers(players: list[Player]) -> tuple[dict[str, int], dict[tuple[str, int], int]]:
     """Gap-based tiers inside each position; a tier break is a real cliff."""
     tiers: dict[str, int] = {}
@@ -154,7 +162,7 @@ def recommend(
     if strategy != "simulate":
         scores = _direct_scores(
             available, evaluator, roster, base_util, wait_value, strategy,
-            by_pos, following, current,
+            by_pos, following, current, league.teams, league.superflex,
         )
         return _build(
             available, scores, evaluator, roster, base_util, wait_value, tiers,
@@ -196,10 +204,17 @@ def _direct_scores(
     by_pos: dict[str, list[Player]],
     following: int,
     current: int,
+    teams: int,
+    superflex: bool = False,
 ) -> dict[int, float]:
     """Rank without simulating the draft.
 
-    `lineup` scores what a player adds to your starting lineup right now.
+    `lineup` scores what a player adds to your starting lineup right now, with a
+    running-back bonus in the first few rounds (see ROBUST_RB_BONUS below). The
+    bonus is switched off in superflex: it was only backtested in 1QB leagues,
+    where quarterbacks are not competing with runners for the same roster spot.
+    Applying it blind there stacks an untested assumption on top of a format
+    that already prices quarterbacks very differently.
 
     `vona` subtracts what you could still expect from that position at your next
     pick if you passed on him now. That expectation is per player, not per
@@ -214,8 +229,14 @@ def _direct_scores(
     """
     scores: dict[int, float] = {}
     can_wait = following > current
+    round_no = (current - 1) // teams + 1 if teams else 1
+    rb_bonus = (
+        ROBUST_RB_BONUS if round_no <= ROBUST_RB_ROUNDS and not superflex else 0.0
+    )
     for i, p in enumerate(available):
         now = evaluator.marginal(roster, p.position, p.value, base_util, p.bye or 0)
+        if rb_bonus and p.position == "RB":
+            now *= 1.0 + rb_bonus
         if strategy == "vona" and can_wait:
             survives = availability(p, following, current)
             others = expected_best_value(

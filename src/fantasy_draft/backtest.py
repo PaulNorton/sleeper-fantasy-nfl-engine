@@ -36,7 +36,7 @@ from .projections import (
     replacement_levels,
     score_stats,
 )
-from .recommend import expected_best_value, recommend
+from .recommend import ROBUST_RB_BONUS, ROBUST_RB_ROUNDS, expected_best_value, recommend
 from .simulate import RolloutConfig, adp_sigma, availability
 from .sleeper import SleeperClient
 from .valuation import HINDSIGHT, LineupEvaluator, add_to_roster
@@ -48,6 +48,13 @@ _pool_cache: dict[str, list[Player]] = {}
 CAPS = {"QB": 2, "RB": 6, "WR": 6, "TE": 2, "K": 1, "DEF": 1}
 
 STRATEGIES = ("engine", "greedy", "blind", "vona", "adp", "vor", "need")
+
+# Two rejected hypotheses live on in reach_averse and ceiling_bench below,
+# excluded from STRATEGIES so a normal backtest run does not include them.
+# tests/hypotheses.py re-runs the full comparison, greedy included, and
+# records why each was kept or dropped.
+REACH_LAMBDA = 0.3
+
 
 
 @dataclass
@@ -162,7 +169,8 @@ def baseline_pick(
     if not legal:
         return None
 
-    if team.strategy in ("greedy", "blind", "vona"):
+    lineup_family = ("greedy", "blind", "vona", "reach_averse", "ceiling_bench")
+    if team.strategy in lineup_family:
         # The engine's lineup model with no simulation: take whoever adds most to
         # the starting lineup right now. Isolates what the rollout is worth.
         evaluator = LineupEvaluator.from_league(
@@ -174,16 +182,43 @@ def baseline_pick(
                 roster, p.position, p.value, 0 if team.strategy == "blind" else (p.bye or 0)
             )
         base = evaluator.utility(roster)
+        round_no = (pick_no - 1) // league.teams + 1 if pick_no else 1
+        rb_bonus = ROBUST_RB_BONUS if round_no <= ROBUST_RB_ROUNDS else 0.0
+
+        def rb_adjusted(p: Player, value: float) -> float:
+            # Folded into "greedy"/"blind" so the backtest measures the engine
+            # as shipped, not the engine minus this feature. Confirmed over 280
+            # paired drafts: +3.1 +/- 1.1 points, t = 2.79.
+            now = evaluator.marginal(roster, p.position, value, base, p.bye or 0)
+            return now * (1.0 + rb_bonus) if p.position == "RB" else now
+
+        if team.strategy == "reach_averse":
+            def score_reach(p: Player) -> float:
+                now = evaluator.marginal(roster, p.position, p.value, base, p.bye or 0)
+                reach = max(0.0, p.adp - pick_no) if pick_no else 0.0
+                return now - REACH_LAMBDA * reach
+
+            return max(legal[:60], key=score_reach)
+
+        if team.strategy == "ceiling_bench":
+            starters_count = sum(league.starter_slots.values())
+            bench_bound = len(team.players) >= starters_count
+
+            def score_ceiling(p: Player) -> float:
+                target = p.ceiling if bench_bound else p.value
+                return evaluator.marginal(roster, p.position, target, base, p.bye or 0)
+
+            return max(legal[:60], key=score_ceiling)
+
         if team.strategy in ("greedy", "blind"):
             # "blind" drafts ignoring bye weeks; it is scored with the same bye
             # penalty as everyone else, so the pair measures what byes are worth.
-            blind = team.strategy == "blind"
-            return max(
-                legal[:60],
-                key=lambda p: evaluator.marginal(
-                    roster, p.position, p.value, base, 0 if blind else (p.bye or 0)
-                ),
-            )
+            if team.strategy == "blind":
+                return max(
+                    legal[:60],
+                    key=lambda p: evaluator.marginal(roster, p.position, p.value, base, 0),
+                )
+            return max(legal[:60], key=lambda p: rb_adjusted(p, p.value))
         # vona: exactly what recommend._direct_scores does, so the backtest
         # measures the strategy that actually ships.
         by_pos: dict[str, list[Player]] = {}

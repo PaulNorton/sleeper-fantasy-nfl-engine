@@ -192,6 +192,14 @@ the lineup is seated again for each bye week your roster has, because whether a
 clash hurts depends on whether your bench happens to cover that position. Byes
 come from the NFL schedule, as the week each team does not play.
 
+**6. A running back bonus in the first four rounds.** Conventional wisdom says
+prioritise running backs early, on the theory that touch-share concentration
+and in-season attrition make a bell-cow scarcer than his points imply. Tested
+rather than assumed - see `tests/hypotheses.py` - and confirmed: +3.1 ± 1.1
+points per draft over 280 paired backtested drafts (t = 2.79). Off in
+superflex, where it was never tested and quarterbacks already dominate the
+early rounds for an unrelated reason.
+
 Optionally the app can also subtract what a position would still offer at your
 next pick (`--strategy vona`), or simulate the remaining draft thousands of
 times (`--strategy simulate`). Both are more sophisticated and both measurably
@@ -263,23 +271,24 @@ paired.
 
 | strategy | 2025 | 2024 | vs ADP |
 |---|---|---|---|
-| `lineup` | 2374 | 2465 | **+238** |
-| best value over replacement | 2287 | 2501 | +212 |
-| fill starters first | 2288 | 2484 | +205 |
-| `vona` | 2261 | 2514 | +206 |
-| ADP | 2155 | 2208 | 0 |
+| `lineup` (shipped) | 2351 | 2454 | **+243** |
+| best value over replacement | 2258 | 2475 | +207 |
+| fill starters first | 2259 | 2457 | +199 |
+| `vona` | 2234 | 2488 | +202 |
+| ADP | 2133 | 2186 | 0 |
 
 Pooled over 120 paired drafts:
 
 | comparison | mean diff | std err | t |
 |---|---|---|---|
-| `lineup` − ADP | +238 | 16 | 14.95 |
-| `lineup` − fill starters | +33 | 10 | 3.24 |
-| `lineup` − `vona` | +32 | 12 | 2.58 |
-| `lineup` − value over replacement | +31 | 11 | 2.91 |
+| `lineup` − ADP | +243 | 15 | 16.22 |
+| `lineup` − fill starters | +44 | 9 | 4.99 |
+| `lineup` − `vona` | +42 | 12 | 3.56 |
+| `lineup` − value over replacement | +36 | 11 | 3.41 |
 | bye-aware − bye-blind | +10.4 | 3.5 | 2.98 |
+| Robust RB bonus − without it | +3.1 | 1.1 | 2.79 |
 
-Two results are worth stating plainly.
+Three results are worth stating plainly.
 
 **Simulating the whole draft is the worst option tested.** In 2025 it finished
 below ADP. Greedy lineup-marginal separates the best candidate from the second
@@ -293,15 +302,25 @@ It is kept because it sees one thing the closed-form strategies miss. Given two
 identical players, one who will last and one who will not, taking the scarce one
 lets you end up with *both*. The closed-form strategies compare each candidate
 against the position's best player next turn, which is the same number either
-way, so they rate them equally. The rollout separates them by 47 points.
+way, so they rate them equally. The rollout separates them by 41 points.
 
 **Subtracting the wait value costs points.** `vona` implements exactly the "can
 I get him later" reasoning, in closed form and with no noise, and it is worse
-than ignoring the question entirely (t = 2.58). The wait columns are still shown
-because they are useful to read; the engine no longer acts on them.
+than ignoring the question entirely. The wait columns are still shown because
+they are useful to read; the engine no longer acts on them.
 
-Two seasons is a thin basis and the season-to-season swing is large — `lineup`
-beat `vona` by 113 points in 2025 and lost to it by 49 in 2024.
+**Two of three tested strategy hypotheses did not survive contact with data.**
+Alongside Robust RB (kept, above), reach-aversion - discounting a pick by how
+far it reaches past his ADP, to hedge against the model being wrong about one
+player - lost by 7.3 ± 3.6 points (t = -2.04): the model's edge over ADP is the
+point of a value model, and pulling picks back toward consensus gives some of
+it away. Chasing ceiling instead of mean value once a roster's starters are
+already filled showed no signal (+2.9 ± 2.5, t = 1.13) - plausible, but not
+distinguishable from noise at this sample size. `tests/hypotheses.py`
+reproduces both comparisons.
+
+Two seasons is a thin basis and the season-to-season swing is large - `lineup`
+beat `vona` by 117 points in 2025 and lost to it by 34 in 2024.
 
 ## Reading the table
 
@@ -388,6 +407,13 @@ superflex, fills mandatory slots before the draft ends, rotates off a saturated
 position, treats a fallen player as likely to go soon, prices rookies wider than
 veterans, and records which strategies separate a scarce player from an
 identical one who will last.
+
+```bash
+PYTHONPATH=tests .venv/bin/python tests/hypotheses.py
+```
+
+Reproduces the strategy-improvement hypotheses tested against the shipped
+engine: one kept (Robust RB), two rejected (reach-aversion, ceiling-chasing).
 
 ```bash
 PYTHONPATH=tests .venv/bin/python tests/calibrate.py
