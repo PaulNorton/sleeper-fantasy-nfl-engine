@@ -36,8 +36,8 @@ from .projections import (
     replacement_levels,
     score_stats,
 )
-from .recommend import recommend
-from .simulate import RolloutConfig, adp_sigma
+from .recommend import expected_best_value, recommend
+from .simulate import RolloutConfig, adp_sigma, availability
 from .sleeper import SleeperClient
 from .valuation import HINDSIGHT, LineupEvaluator, add_to_roster
 
@@ -47,7 +47,7 @@ _pool_cache: dict[str, list[Player]] = {}
 # Stops a baseline drafting fifteen running backs.
 CAPS = {"QB": 2, "RB": 6, "WR": 6, "TE": 2, "K": 1, "DEF": 1}
 
-STRATEGIES = ("engine", "greedy", "adp", "vor", "need")
+STRATEGIES = ("engine", "greedy", "vona", "adp", "vor", "need")
 
 
 @dataclass
@@ -145,6 +145,8 @@ def baseline_pick(
     board: list[Player],
     taken: set[str],
     rounds_left: int,
+    pick_no: int = 0,
+    next_pick: int = 0,
 ) -> Player | None:
     """A pick from one of the simple strategies the engine is measured against."""
     forced = _forced_fill(team, league, rounds_left)
@@ -160,7 +162,7 @@ def baseline_pick(
     if not legal:
         return None
 
-    if team.strategy == "greedy":
+    if team.strategy in ("greedy", "vona"):
         # The engine's lineup model with no simulation: take whoever adds most to
         # the starting lineup right now. Isolates what the rollout is worth.
         evaluator = LineupEvaluator.from_league(
@@ -170,10 +172,30 @@ def baseline_pick(
         for p in team.players:
             roster = add_to_roster(roster, p.position, p.value)
         base = evaluator.utility(roster)
-        return max(
-            legal[:60],
-            key=lambda p: evaluator.marginal(roster, p.position, p.value, base),
-        )
+        if team.strategy == "greedy":
+            return max(
+                legal[:60],
+                key=lambda p: evaluator.marginal(roster, p.position, p.value, base),
+            )
+        # vona: exactly what recommend._direct_scores does, so the backtest
+        # measures the strategy that actually ships.
+        by_pos: dict[str, list[Player]] = {}
+        for p in legal:
+            by_pos.setdefault(p.position, []).append(p)
+        can_wait = next_pick > pick_no
+
+        def score(p: Player) -> float:
+            now = evaluator.marginal(roster, p.position, p.value, base)
+            if not can_wait:
+                return now
+            survives = availability(p, next_pick, pick_no)
+            others = expected_best_value(
+                by_pos.get(p.position, []), next_pick, pick_no, skip=p.player_id
+            )
+            alternative = survives * p.value + (1.0 - survives) * others
+            return now - evaluator.marginal(roster, p.position, alternative, base)
+
+        return max(legal[:60], key=score)
     if team.strategy == "adp":
         return legal[0]  # board is already in market order
     if team.strategy == "vor":
@@ -253,7 +275,14 @@ def run_draft(
             )
             choice = recs[0].player if recs else None
         else:
-            choice = baseline_pick(team, league, board, taken, rounds_left)
+            following = next(
+                (n for n in range(pick_no + 1, league.teams * rounds + 1)
+                 if state.slot_at_pick(n) == slot),
+                0,
+            )
+            choice = baseline_pick(
+                team, league, board, taken, rounds_left, pick_no, following
+            )
 
         if choice is None:
             continue

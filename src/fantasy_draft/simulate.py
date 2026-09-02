@@ -73,6 +73,7 @@ class RolloutConfig:
     pool: int = 220         # players considered draftable in the horizon
     seed: int = 12345
     risk: float | None = None  # None scores the average season; 0.25 the floor, 0.75 the upside
+    strategy: str = "vona"     # "vona", "lineup" or "simulate"; see recommend.recommend
     objective: str = "points"  # "points" maximises your total; "win" maximises beating the field
     title_scale: float = 40.0  # points of roster edge that meaningfully shifts title odds
 

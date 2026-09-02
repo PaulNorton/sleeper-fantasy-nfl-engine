@@ -66,6 +66,13 @@ RISK = typer.Option(
          "0.75 chases upside. Default optimises the average.",
 )
 NOFP = typer.Option(False, "--no-consensus", help="Skip FantasyPros expert consensus.")
+STRAT = typer.Option(
+    "vona", "--strategy",
+    help="How to rank. 'vona' scores what a player adds now less what his position "
+         "would still offer at your next pick. 'lineup' drops the wait adjustment. "
+         "'simulate' plays the rest of the draft out - backtests worse, kept for "
+         "comparison and required by --objective win.",
+)
 OBJ = typer.Option(
     "points", "--objective",
     help="'points' maximises your expected total. 'win' maximises the chance of "
@@ -170,6 +177,7 @@ def board(
     sims: int = SIM,
     risk: Optional[float] = RISK,
     no_consensus: bool = NOFP,
+    strategy: str = STRAT,
     objective: str = OBJ,
     limit: int = typer.Option(12, "--limit", "-n", help="How many picks to show."),
 ) -> None:
@@ -177,7 +185,7 @@ def board(
     with SleeperClient() as client:
         session = _session(client, username, league_id, draft_id, season, slot,
                            projections, not no_consensus)
-        console.print(_screen(session, limit, sims, risk, objective))
+        console.print(_screen(session, limit, sims, risk, objective, strategy))
 
 
 @app.command()
@@ -191,6 +199,7 @@ def watch(
     sims: int = SIM,
     risk: Optional[float] = RISK,
     no_consensus: bool = NOFP,
+    strategy: str = STRAT,
     objective: str = OBJ,
     interval: float = typer.Option(5.0, "--interval", "-i", help="Seconds between polls."),
     limit: int = typer.Option(12, "--limit", "-n", help="How many picks to show."),
@@ -200,7 +209,7 @@ def watch(
         session = _session(client, username, league_id, draft_id, season, slot,
                            projections, not no_consensus)
         last = -1
-        with Live(_screen(session, limit, sims, risk, objective), console=console, screen=True,
+        with Live(_screen(session, limit, sims, risk, objective, strategy), console=console, screen=True,
                   refresh_per_second=4) as live:
             while True:
                 time.sleep(interval)
@@ -210,7 +219,7 @@ def watch(
                     continue
                 if len(session.state.picks) != last:
                     last = len(session.state.picks)
-                    live.update(_screen(session, limit, sims, risk, objective))
+                    live.update(_screen(session, limit, sims, risk, objective, strategy))
                 if session.state.status == "complete":
                     break
         console.print("[green]Draft complete.[/]")
@@ -339,7 +348,10 @@ def _session(client, username, league_id, draft_id, season, slot, overrides=None
 
 
 def _screen(session, limit: int, sims: int = 300, risk: float | None = None,
-            objective: str = "points"):
+            objective: str = "points", strategy: str = "vona"):
+    # Beating the field can only be judged by simulating the other rosters.
+    if objective == "win":
+        strategy = "simulate"
     picks = session.my_picks(limit=8)
     recs = recommend(
         session.league,
@@ -349,7 +361,7 @@ def _screen(session, limit: int, sims: int = 300, risk: float | None = None,
         session.my_roster_id,
         picks,
         limit=limit,
-        cfg=RolloutConfig(sims=sims, risk=risk, objective=objective),
+        cfg=RolloutConfig(sims=sims, risk=risk, objective=objective, strategy=strategy),
     )
     if session.my_roster_id is None:
         console.print(
