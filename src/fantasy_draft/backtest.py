@@ -28,6 +28,7 @@ from .draft import DraftState
 from .league import LeagueSettings
 from .projections import (
     Player,
+    waiver_levels,
     apply_reliability,
     apply_vorp,
     attach_risk,
@@ -38,12 +39,15 @@ from .projections import (
 from .recommend import recommend
 from .simulate import RolloutConfig, adp_sigma
 from .sleeper import SleeperClient
-from .valuation import HINDSIGHT, LineupEvaluator
+from .valuation import HINDSIGHT, LineupEvaluator, add_to_roster
+
+# Set once per backtest so the greedy baseline can build an evaluator.
+_pool_cache: dict[str, list[Player]] = {}
 
 # Stops a baseline drafting fifteen running backs.
 CAPS = {"QB": 2, "RB": 6, "WR": 6, "TE": 2, "K": 1, "DEF": 1}
 
-STRATEGIES = ("engine", "adp", "vor", "need")
+STRATEGIES = ("engine", "greedy", "adp", "vor", "need")
 
 
 @dataclass
@@ -75,6 +79,28 @@ def load_actuals(
                 points = float(stats.get("pts_ppr", 0.0) or 0.0)
             actual[str(row.get("player_id"))] = points
     return actual
+
+
+def actual_replacement(
+    players: list[Player], actual: dict[str, float], ranks: dict[str, int]
+) -> dict[str, float]:
+    """What a replacement-level player really scored, for scoring unfilled slots.
+
+    Using the *projected* replacement here quietly rigs the comparison. Kickers
+    projected 70 points in 2025 and the replacement-level kicker actually scored
+    142, so a team that skipped the position was docked 72 points it would never
+    really have lost - it would simply have streamed someone. The yardstick for
+    what a roster was worth has to come from the same season it is scoring.
+    """
+    by_pos: dict[str, list[float]] = {}
+    for p in players:
+        by_pos.setdefault(p.position, []).append(actual.get(p.player_id, 0.0))
+    levels: dict[str, float] = {}
+    for pos, values in by_pos.items():
+        values.sort(reverse=True)
+        rank = ranks.get(pos, max(1, len(values) // 4))
+        levels[pos] = values[min(rank, len(values)) - 1]
+    return levels
 
 
 def market_order(players: list[Player], seed: int) -> list[Player]:
@@ -134,6 +160,20 @@ def baseline_pick(
     if not legal:
         return None
 
+    if team.strategy == "greedy":
+        # The engine's lineup model with no simulation: take whoever adds most to
+        # the starting lineup right now. Isolates what the rollout is worth.
+        evaluator = LineupEvaluator.from_league(
+            league, waiver_levels(_pool_cache["players"], league.replacement_ranks(), league.teams)
+        )
+        roster: dict[str, list[float]] = {}
+        for p in team.players:
+            roster = add_to_roster(roster, p.position, p.value)
+        base = evaluator.utility(roster)
+        return max(
+            legal[:60],
+            key=lambda p: evaluator.marginal(roster, p.position, p.value, base),
+        )
     if team.strategy == "adp":
         return legal[0]  # board is already in market order
     if team.strategy == "vor":
@@ -183,6 +223,7 @@ def run_draft(
 ) -> list[Team]:
     """One full draft. Only the focal seat's strategy varies between runs."""
     cfg = cfg or RolloutConfig(sims=120)
+    _pool_cache["players"] = players
     board = market_order(players, seed)
     teams = {
         slot: Team(
@@ -302,7 +343,9 @@ def run(
     and the same opponents. Only the focal seat changes, which is what isolates
     the strategy from the luck of the draft.
     """
-    evaluator = LineupEvaluator.from_league(league, replacement)
+    evaluator = LineupEvaluator.from_league(
+        league, actual_replacement(players, actual, league.replacement_ranks())
+    )
     slots = slots or list(range(1, league.teams + 1))
     results = {s: Result(s) for s in strategies}
 
