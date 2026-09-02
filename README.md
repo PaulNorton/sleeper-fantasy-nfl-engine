@@ -83,6 +83,7 @@ Ranks the board for your next pick and exits. The main command.
 |---|---|---|
 | `--limit`, `-n` | 12 | How many players to rank. |
 | `--sims` | 300 | Draft simulations per candidate. Below ~200 the ordering starts to wobble; more is steadier and slower. 300 ranks in about two seconds. |
+| `--strategy` | `vona` | How to rank. `vona` scores what a player adds now, less what his position would still offer at your next pick. `lineup` drops the wait adjustment. `simulate` plays the rest of the draft out — it backtests worse, but see [what the backtest found](#what-the-backtest-found). |
 | `--objective` | `points` | `points` maximises your expected season total. `win` simulates the other rosters too and maximises your share of the title odds. See [what variance is worth](#what-that-turns-out-to-be-worth). |
 | `--risk` | mean | Percentile of your simulated seasons to optimise, e.g. `0.25` for the floor, `0.75` for upside. In practice this rarely changes the top pick; `--objective win` is the knob that bites. |
 | `--projections` | — | CSV of your own projections and/or ADP, overlaid on everything else. |
@@ -177,18 +178,16 @@ nothing to the lineup and little to the bench, so he scores near zero no matter
 how high he sits on a ranking list. Superflex changes this automatically,
 because the lineup has a slot he can fill.
 
-**4. What the rest of the draft does.** The app simulates the remaining draft
-many times. Opponents are modelled as ADP drafters: each remaining player gets a
-sampled landing spot from a normal centred on his ADP, truncated to "has not
-gone yet", and opponents take players in that order. At each of your own future
-picks the simulation takes whichever player adds the most utility. A candidate's
-score is your average final roster utility across those simulations, so it
-already nets out everything you would have taken instead.
+**4. Whether you could just wait.** A player worth taking now is one you cannot
+get later. For each candidate the app works out what his position would still
+offer at your next pick — blending his own chance of surviving with the best of
+whatever else would remain — and subtracts it. A player certain to last nets to
+roughly zero; one about to disappear keeps his full value.
 
-This is what stops the obvious failure modes. Taking a run on a thin position
-early is rewarded because the simulation shows the drop-off. Taking a kicker in
-round 8 is punished because the simulation shows you can still get one in round
-15. Stacking a fourth running back is punished because he never starts.
+That is done in closed form. The app can also simulate the remaining draft
+thousands of times instead (`--strategy simulate`), with opponents modelled as
+ADP drafters. That is the more complete model and it is measurably worse; see
+below.
 
 ## Ranges of outcomes
 
@@ -247,6 +246,44 @@ in your own total, so upside that occasionally wins outright counts for more
 than the same points delivered reliably. Even then the reordering is modest -
 a real effect, not a large one.
 
+## What the backtest found
+
+`fdraft backtest` replays a finished season: draft on preseason projections
+only, score the roster on what actually happened. Two seasons, ten draft slots,
+three repetitions, every strategy facing identical drafts.
+
+| strategy | 2025 | 2024 | vs ADP |
+|---|---|---|---|
+| `lineup` (greedy) | 2234 | 2367 | +262 |
+| `vona` | 2104 | 2467 | +247 |
+| best value over replacement | 2096 | 2419 | +219 |
+| ADP | 2018 | 2059 | 0 |
+| `simulate` (rollout) | 1970 | 2376 | +154 |
+
+Pooled over 60 paired drafts, `lineup` and `vona` are indistinguishable from
+each other (+15 ± 24 points, t = 0.61) and both beat drafting to ADP by a clear
+margin (t > 6). Neither is separable from plain value over replacement at this
+sample size, though both trend ahead.
+
+**Simulating the whole draft is the worst option tested.** In 2025 it finished
+below ADP. The failure is instructive: greedy lineup-marginal separates the best
+candidate from the second by about 75 points, but the rollout turns that same
+difference into 4.5 points of final roster value, because simulated future-you
+simply drafts a comparable player instead. Seed-to-seed noise at 300 simulations
+is 3.3 points, so what survives the compression is barely above the noise floor
+and the top two candidates swap depending on the seed.
+
+It is kept because it is the only strategy that sees one thing the closed-form
+ones miss. Given two identical players, one who will last and one who will not,
+taking the scarce one lets you end up with *both*. The closed-form strategies
+compare each candidate against the position's best player next turn, which is
+the same number either way, so they rate them equally. The rollout separates
+them by 47 points.
+
+Two seasons is a thin basis and the season-to-season swing is large — `lineup`
+beat `vona` by 130 points in 2025 and lost to it by 100 in 2024. Treat the
+ordering among the top three as unsettled.
+
 ## Reading the table
 
 | Column | Meaning |
@@ -293,10 +330,10 @@ Bijan Robinson,RB,318.0,3.4
 
 ## Tuning
 
-`--sims` controls simulation count. The default of 300 ranks the board in about
-two seconds. Simulating seasons on top of draft order roughly doubled the noise
-in a score, so the estimator uses common random numbers and antithetic pairs;
-below about 200 sims the ordering starts to wobble.
+`--sims` only applies to `--strategy simulate` and `--objective win`. The default
+of 300 ranks the board in about two seconds; below about 200 the ordering
+wobbles between seeds. The default `vona` strategy runs in closed form and is
+effectively instant.
 
 The judgement calls live in three files and are meant to be edited:
 `valuation.py` holds bench factors, injury discounts and the hindsight blend;
@@ -325,4 +362,12 @@ PYTHONPATH=tests .venv/bin/python tests/test_engine.py
 Runs the engine against live projections and a synthetic draft, asserting that
 it stops drafting quarterbacks once the slot is filled, raises them in
 superflex, fills mandatory slots before the draft ends, rotates off a saturated
-position, and treats a fallen player as likely to go soon.
+position, treats a fallen player as likely to go soon, prices rookies wider than
+veterans, and records which strategies separate a scarce player from an
+identical one who will last.
+
+```bash
+PYTHONPATH=tests .venv/bin/python tests/calibrate.py
+```
+
+Re-derives the spread and shrinkage constants from finished seasons.
