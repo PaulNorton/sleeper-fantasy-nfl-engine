@@ -324,8 +324,20 @@ QB instead of RB tests whether it is a genuine RB effect or an artifact of
 rewarding any early pick. It is not generic - WR lost clearly (-9.0 ± 2.6,
 t = -3.42), TE lost suggestively (-7.9 ± 3.7, t = -2.13), QB showed nothing
 (-2.2 ± 4.2). That two of three lose money is stronger evidence for Robust RB
-than a clean win alone would have been. `tests/hypotheses.py` reproduces all
-six comparisons.
+than a clean win alone would have been. `tests/hypotheses.py` reproduces all nine comparisons.
+
+Three more were tested afterward, all rejected. A parameter sweep around
+Robust RB's setting (rounds in 2-6, bonus in 0.08-0.30) found nothing better
+than the shipped (4, 15%); the best alternative reached t = 1.49, short of
+significance. Handcuffing - bonusing a backup running back who shares a team
+with a starter already on the roster - lost clearly (-2.8 ± 1.1, t = -2.53
+over 280 paired drafts): a handcuff is a bench slot that pays off in only the
+one season a starter is actually hurt, and the waiver floor already prices
+that without a manual override. Draft-run detection - boosting a position
+being taken faster than its fair share in the actual draft underway, tested
+against `--opponent need` since ADP bots create no genuine runs to detect -
+showed no signal (-4.2 ± 3.0, t = -1.43) even with opponents capable of
+producing one.
 
 Two seasons is a thin basis and the season-to-season swing is large - `lineup`
 beat `vona` by 117 points in 2025 and lost to it by 34 in 2024.

@@ -71,6 +71,20 @@ POSBONUS_AMOUNT = ROBUST_RB_BONUS
 # pick-timing or availability estimate involved, just "is a cliff imminent".
 CLIFF_BONUS = 0.20
 
+# H7: handcuffing. Bonus a backup running back who shares a team with an RB
+# already on the roster and is clearly not his committee-mate (well below his
+# value) - the direct beneficiary if the starter goes down.
+HANDCUFF_BONUS = 0.25
+HANDCUFF_VALUE_RATIO = 1.5
+
+# H8: draft-run detection. Boost a position's value when it is being taken
+# faster than its fair share of league-wide starter demand *in this draft*,
+# using picks actually made rather than preseason ADP. Only testable against
+# opponents who create genuine runs - ADP bots do not, by construction, so
+# this one is screened with --opponent need.
+RUN_WINDOW_ROUNDS = 1.0
+RUN_LAMBDA = 0.5
+
 
 
 @dataclass
@@ -170,6 +184,7 @@ def baseline_pick(
     rounds_left: int,
     pick_no: int = 0,
     next_pick: int = 0,
+    picks: list[dict] | None = None,
 ) -> Player | None:
     """A pick from one of the simple strategies the engine is measured against."""
     forced = _forced_fill(team, league, rounds_left)
@@ -188,6 +203,7 @@ def baseline_pick(
     lineup_family = (
         "greedy", "blind", "vona", "reach_averse", "ceiling_bench",
         "posbonus_wr", "posbonus_te", "posbonus_qb", "tier_cliff",
+        "handcuff", "run_aware",
     )
     if team.strategy in lineup_family:
         # The engine's lineup model with no simulation: take whoever adds most to
@@ -240,6 +256,47 @@ def baseline_pick(
                 return now * (1.0 + CLIFF_BONUS) if last_in_tier else now
 
             return max(legal[:60], key=score_cliff)
+
+        if team.strategy == "handcuff":
+            my_rb_value = {
+                p.team: p.value for p in team.players if p.position == "RB" and p.team
+            }
+
+            def score_handcuff(p: Player) -> float:
+                now = evaluator.marginal(roster, p.position, p.value, base, p.bye or 0)
+                starter_value = my_rb_value.get(p.team)
+                if (
+                    p.position == "RB"
+                    and starter_value is not None
+                    and starter_value > p.value * HANDCUFF_VALUE_RATIO
+                ):
+                    now *= 1.0 + HANDCUFF_BONUS
+                return now
+
+            return max(legal[:60], key=score_handcuff)
+
+        if team.strategy == "run_aware":
+            window = max(1, round(RUN_WINDOW_ROUNDS * league.teams))
+            recent = (picks or [])[-window:]
+            by_id = {pl.player_id: pl for pl in _pool_cache["players"]}
+            recent_counts: dict[str, int] = {}
+            for row in recent:
+                pl = by_id.get(str(row.get("player_id")))
+                if pl:
+                    recent_counts[pl.position] = recent_counts.get(pl.position, 0) + 1
+            demand = league.starters_per_team()
+            total_demand = sum(demand.values()) or 1.0
+            expected_share = {pos: d / total_demand for pos, d in demand.items()}
+
+            def score_run(p: Player) -> float:
+                now = evaluator.marginal(roster, p.position, p.value, base, p.bye or 0)
+                actual_share = recent_counts.get(p.position, 0) / max(1, len(recent))
+                excess = actual_share - expected_share.get(p.position, 0.15)
+                if excess > 0:
+                    now *= 1.0 + RUN_LAMBDA * excess
+                return now
+
+            return max(legal[:60], key=score_run)
 
         if team.strategy == "ceiling_bench":
             starters_count = sum(league.starter_slots.values())
@@ -366,7 +423,7 @@ def run_draft(
                 0,
             )
             choice = baseline_pick(
-                team, league, board, taken, rounds_left, pick_no, following
+                team, league, board, taken, rounds_left, pick_no, following, picks
             )
 
         if choice is None:

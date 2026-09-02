@@ -35,6 +35,33 @@ H5 - Tier-cliff bonus: reward taking the last player in his gap-based tier -
      using the same tiers already shown in the "Tier" column. Distinct from
      vona: a static gap check, no pick-timing or availability estimate.
      NO SIGNAL. +2.7 +/- 4.6 points over 120 paired drafts, t = 0.60.
+
+H6 - Robust RB parameter sweep: is (4 rounds, 15% bonus) actually the best
+     setting, or just the first one tried?
+     NO IMPROVEMENT FOUND. Swept rounds in {2,3,5,6} and bonus in
+     {0.08,0.10,0.20,0.30}, plus two other combinations, all paired against the
+     shipped setting over 80 drafts each. Best alternative was (5 rounds, 15%)
+     at +4.1 +/- 2.8 (t=1.49) - not significant. The shipped values sit at a
+     flat local optimum; left unchanged.
+
+H7 - Handcuffing: bonus a backup running back who shares a team with an RB
+     already on the roster and is clearly not his committee-mate, on the theory
+     that he is the direct beneficiary if the starter is hurt.
+     REJECTED. -2.8 +/- 1.1 points over 280 paired drafts, t = -2.53 (screened
+     at -5.2 +/- 2.2, t = -2.42, then confirmed at higher n). Plausible in
+     theory; the model's own marginal-value ranking already does better than
+     forcing a handcuff pick, most likely because a handcuff is a bench slot
+     that is a bad bet most seasons and only pays off in the one where the
+     starter is actually hurt, which the waiver floor already prices reasonably
+     without a manual override.
+
+H8 - Draft-run detection: boost a position's value when it is being taken
+     faster than its fair share of league-wide demand in the actual draft
+     underway, rather than from preseason ADP. Only tested where it has
+     anything to exploit: against --opponent need, since ADP bots create no
+     real runs by construction.
+     NO SIGNAL. -4.2 +/- 3.0 points over 120 paired drafts, t = -1.43, even
+     with opponents capable of producing genuine runs to detect.
 """
 
 import math
@@ -49,6 +76,7 @@ SEASONS = ("2025", "2024")
 STRATEGIES = (
     "greedy", "reach_averse", "ceiling_bench",
     "posbonus_wr", "posbonus_te", "posbonus_qb", "tier_cliff",
+    "handcuff",
 )
 
 
@@ -67,7 +95,7 @@ def main() -> None:
                 pooled[s].extend(res[s].points)
 
         print(f"\npooled {len(pooled['greedy'])} paired drafts, baseline = greedy (shipped lineup)")
-        for h in ("reach_averse", "ceiling_bench", "posbonus_wr", "posbonus_te", "posbonus_qb", "tier_cliff"):
+        for h in ("reach_averse", "ceiling_bench", "posbonus_wr", "posbonus_te", "posbonus_qb", "tier_cliff", "handcuff"):
             diffs = [a - b for a, b in zip(pooled[h], pooled["greedy"])]
             mean = statistics.mean(diffs)
             err = statistics.stdev(diffs) / math.sqrt(len(diffs))
@@ -76,6 +104,10 @@ def main() -> None:
             "\nRobust RB (H1) is folded into the shipped strategy, so it cannot be "
             "isolated this way any more; see recommend.ROBUST_RB_BONUS for its "
             "confirmed effect size."
+        )
+        print(
+            "run_aware (H8) needs --opponent need to have anything to exploit and "
+            "is not included in this pooled comparison; see the module docstring."
         )
 
 
