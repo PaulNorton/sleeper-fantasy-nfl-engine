@@ -30,16 +30,95 @@ fdraft setup --league-id YOUR_LEAGUE_ID --slot 7
 Every command takes `--league-id` to work against your other league without
 changing the saved default.
 
-## Use
+## Commands
+
+Every command reads `fdraft.json` for defaults, so after `setup` the flags are
+optional. Any flag overrides the saved value for that one run.
+
+### Shared flags
+
+These appear on `board`, `watch`, `roster` and `available`.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--username`, `-u` | from config | Your Sleeper handle. Identifies which team is yours. Not an email. |
+| `--league-id`, `-l` | from config | Sleeper league id, from your league page URL. Use it to work against a second league without changing the saved default. |
+| `--draft-id`, `-d` | from config | Target a draft directly. Works for standalone mock drafts that belong to no league. |
+| `--season` | current | Season, e.g. `2026`. |
+| `--slot` | detected | Your draft slot, 1-based. Only needed when the draft order is not published yet and you are not in the league's roster list. |
+
+`roster` and `available` also take `--projections` and `--no-consensus`, below,
+so they read the same data the recommendations do.
+
+### `fdraft setup`
+
+Saves your league to `fdraft.json` so other commands need no flags.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--username`, `-u` | — | Your Sleeper handle. Looks up your leagues for the season. |
+| `--league-id`, `-l` | — | Skip the league picker. Required if you are in more than one league. |
+| `--slot` | — | Save your draft slot. Worth setting when configuring from a league id alone. |
+| `--season` | current | Season to search for leagues. |
+
+Give a username, a league id, or both. With only a league id it saves the
+league without resolving which team is yours, so add `--slot`.
 
 ```bash
-fdraft watch          # follow the live draft, re-rank after every pick
-fdraft board          # rank the board once
-fdraft available -p RB   # raw value list, no roster logic
-fdraft roster         # your picks and which starter slots are still open
+fdraft setup --username YOUR_SLEEPER_NAME                     # lists your leagues
+fdraft setup --username YOUR_SLEEPER_NAME --league-id YOUR_LEAGUE_ID   # picks one
+fdraft setup --league-id YOUR_LEAGUE_ID --slot 7                # no account needed
 ```
 
-Mock drafts work too: `fdraft board --draft-id 123456789 --slot 4`.
+### `fdraft leagues`
+
+Lists your leagues for a season with their ids, team counts and status. Takes
+`--username` and `--season` only.
+
+### `fdraft board`
+
+Ranks the board for your next pick and exits. The main command.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--limit`, `-n` | 12 | How many players to rank. |
+| `--sims` | 300 | Draft simulations per candidate. Below ~200 the ordering starts to wobble; more is steadier and slower. 300 ranks in about two seconds. |
+| `--objective` | `points` | `points` maximises your expected season total. `win` simulates the other rosters too and maximises your share of the title odds. See [what variance is worth](#what-that-turns-out-to-be-worth). |
+| `--risk` | mean | Percentile of your simulated seasons to optimise, e.g. `0.25` for the floor, `0.75` for upside. In practice this rarely changes the top pick; `--objective win` is the knob that bites. |
+| `--projections` | — | CSV of your own projections and/or ADP, overlaid on everything else. |
+| `--no-consensus` | off | Skip FantasyPros. Falls back to Sleeper projections alone, and loses bye weeks and the expert-disagreement half of the risk model. |
+
+### `fdraft watch`
+
+The same board, refreshed as the draft happens. Takes every `board` flag plus:
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--interval`, `-i` | 5.0 | Seconds between polls. It only re-ranks when a pick is actually made. |
+
+Safe to start before the draft opens: it re-reads the pick order every poll, so
+it picks up a randomised order at kickoff.
+
+### `fdraft roster`
+
+Your drafted players seated into starter slots, and which slots are still open.
+
+### `fdraft available`
+
+The best players still on the board by raw value, with floor, ceiling, ADP and
+bye. No roster logic, no simulation.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--pos`, `-p` | all | Filter to one position, e.g. `RB`. |
+| `--limit`, `-n` | 25 | How many players to list. |
+
+```bash
+fdraft watch                          # follow the draft live
+fdraft board --objective win -n 20    # rank by title odds
+fdraft available -p RB -n 30          # who is left at running back
+fdraft board --league-id 1397…        # your other league
+```
 
 ## How a pick is scored
 
