@@ -339,6 +339,19 @@ against `--opponent need` since ADP bots create no genuine runs to detect -
 showed no signal (-4.2 ± 3.0, t = -1.43) even with opponents capable of
 producing one.
 
+By that point every decision-time heuristic layered on top of marginal value
+had lost except Robust RB, which won for one position only - suggesting it
+compensates for something the input calibration under-represents for RB
+specifically, not that "prioritise a position" is a good heuristic in general.
+Three more hypotheses tested that directly: RB-specific waiver depth (no
+configuration beat the shared 0.5-round default), RB-specific bench factor
+(raising it was clearly worse; lowering it to zero looked promising at 280
+paired drafts, t = 2.15, but regressed to t = 1.51 at 600 - a false positive
+settling toward zero under scrutiny), and uncapping RB's shrinkage from 1.00
+toward its measured 1.11 (flat at best, worse elsewhere). None replicated
+Robust RB's effect. It stands as a genuine, position-specific exception, not a
+proxy for a calibration constant that could substitute for it.
+
 Two seasons is a thin basis and the season-to-season swing is large - `lineup`
 beat `vona` by 117 points in 2025 and lost to it by 34 in 2024.
 

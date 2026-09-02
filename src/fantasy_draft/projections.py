@@ -270,6 +270,11 @@ def apply_reliability(players: list[Player], replacement: dict[str, float]) -> N
 # round -6.5 +/- 3.7, two rounds -29.5 +/- 11.4. A local optimum, not a guess.
 WAIVER_DEPTH_ROUNDS = 0.5
 
+# Per-position override, empty by default. Lets a hypothesis test give one
+# position a different waiver depth than the shared constant above without
+# touching everyone else; see tests/hypotheses.py H9.
+WAIVER_DEPTH_BY_POSITION: dict[str, float] = {}
+
 
 def waiver_levels(
     players: list[Player], ranks: dict[str, int], teams: int
@@ -289,7 +294,8 @@ def waiver_levels(
     levels: dict[str, float] = {}
     for pos, values in by_pos.items():
         values.sort(reverse=True)
-        extra = max(1, round(WAIVER_DEPTH_ROUNDS * teams))
+        depth = WAIVER_DEPTH_BY_POSITION.get(pos, WAIVER_DEPTH_ROUNDS)
+        extra = max(1, round(depth * teams))
         rank = ranks.get(pos, max(1, len(values) // 4)) + extra
         levels[pos] = values[min(rank, len(values)) - 1]
     return levels

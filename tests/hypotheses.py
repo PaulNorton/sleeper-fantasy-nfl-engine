@@ -62,6 +62,44 @@ H8 - Draft-run detection: boost a position's value when it is being taken
      real runs by construction.
      NO SIGNAL. -4.2 +/- 3.0 points over 120 paired drafts, t = -1.43, even
      with opponents capable of producing genuine runs to detect.
+
+By this point every decision-time heuristic layered on top of marginal value
+had lost except Robust RB, which won for one position only. That pattern
+suggested Robust RB was not "prioritising RB is a good heuristic" so much as
+compensating for something the *input calibration* under-represents for RB
+specifically - which would mean the more honest fix lives in the data layer
+(waiver depth, bench value, shrinkage), not in another decision-time bonus.
+Three more hypotheses tested that directly, sweeping existing calibration
+constants for RB alone rather than adding new overlays. None replicated or
+improved on the shipped bonus.
+
+H9 - RB-specific waiver depth: give running backs their own depth-below-
+     replacement instead of sharing the global WAIVER_DEPTH_ROUNDS with every
+     other position.
+     NO IMPROVEMENT FOUND. Swept 0.15 to 1.5 rounds against the shared 0.5;
+     every value was flat or worse (best: 0.75 rounds at +1.3 +/- 2.3, t=0.56).
+
+H10 - RB-specific bench factor: raise it, on the theory that RB bench depth
+      deserves more credit than the shared BENCH_FACTOR curve gives it -
+      motivated directly by handcuffing's failure, to see if a more general
+      version of the same idea (without requiring a same-team match) fares
+      better.
+      REJECTED, and informatively backwards. Every value above the shipped 0.09
+      was clearly worse (0.30: t=-4.02). Lowering it to 0.0 looked promising at
+      first (+5.3 +/- 3.4 at 100 drafts, then +4.3 +/- 2.0 at 280, t=2.15) but
+      regressed to +2.1 +/- 1.4 (t=1.51) at 600 paired drafts - a textbook false
+      positive shrinking toward zero under more scrutiny. Left unchanged.
+
+H11 - RB shrinkage uncapping: SHRINKAGE["RB"] was capped at 1.00 out of caution
+      even though the measured regression slope was 1.11. If Robust RB's win
+      were really a calibration gap, raising this should show it.
+      NO IMPROVEMENT FOUND. Swept 0.85 to 1.30 against the shipped 1.00; the
+      closest alternative (1.30) was flat (t=0.18), everything else worse
+      (0.85: t=-2.09).
+
+The data-layer explanation does not hold up. Robust RB stands as a genuine,
+position-specific exception to "trust the marginal-value system," not a proxy
+for a calibration constant that could replace it.
 """
 
 import math
