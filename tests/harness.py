@@ -9,7 +9,9 @@ from fantasy_draft.league import LeagueSettings
 from fantasy_draft.fantasypros import load_consensus
 from fantasy_draft.projections import (
     apply_consensus,
+    apply_reliability,
     apply_vorp,
+    attach_risk,
     load_players,
     replacement_levels,
 )
@@ -59,6 +61,8 @@ def load(league, season="2026", consensus=True):
             rows = load_consensus(league.scoring_format, league.superflex, client.cache_dir)
             apply_consensus(players, rows)
     replacement = replacement_levels(players, league.replacement_ranks())
+    apply_reliability(players, replacement)
+    attach_risk(players)
     apply_vorp(players, replacement)
     return players, replacement
 

@@ -13,6 +13,8 @@ from .projections import (
     Player,
     apply_consensus,
     apply_overrides,
+    apply_reliability,
+    attach_risk,
     apply_vorp,
     load_players,
     replacement_levels,
@@ -159,6 +161,8 @@ def build_session(
     if overrides:
         apply_overrides(players, Path(overrides))
     replacement = replacement_levels(players, league.replacement_ranks())
+    apply_reliability(players, replacement)
+    attach_risk(players)
     apply_vorp(players, replacement)
 
     roster_names: dict[int, str] = {}

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from .draft import DraftState, open_starter_slots
 from .league import LeagueSettings
-from .projections import MISSING_ADP, Player
+from .projections import MISSING_ADP, Player, waiver_levels
 from .simulate import RolloutConfig, availability, score_candidates
 from .valuation import LineupEvaluator, Roster, roster_from_players
 
@@ -121,7 +121,11 @@ def recommend(
         else []
     )
     roster = roster_from_players(my_players)
-    evaluator = LineupEvaluator.from_league(league, replacement)
+    # The evaluator prices an unfilled slot at what waivers would give you, not
+    # at replacement level; see waiver_levels for why those differ.
+    evaluator = LineupEvaluator.from_league(
+        league, waiver_levels(all_players, league.replacement_ranks(), league.teams)
+    )
 
     current = my_picks[0] if my_picks else state.current_pick
     following = my_picks[1] if len(my_picks) > 1 else current + 2 * state.teams

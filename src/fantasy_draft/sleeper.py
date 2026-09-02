@@ -109,3 +109,12 @@ class SleeperClient:
             ("order_by", "pts_ppr"),
         ]
         return self._get(f"{V2}/projections/nfl/{season}", params=params, ttl=ttl) or []
+
+    def stats(self, season: str, position: str, ttl: float = 604800) -> list[dict]:
+        """Actual season stat lines. Finished seasons never change, so cache hard."""
+        params = [
+            ("season_type", "regular"),
+            ("position[]", position),
+            ("order_by", "pts_ppr"),
+        ]
+        return self._get(f"{V2}/stats/nfl/{season}", params=params, ttl=ttl) or []

@@ -153,8 +153,8 @@ print("PASS: rotates off a saturated position")
 # Runs last because it edits projections in place.
 wrs = sorted([p for p in players if p.position == "WR"], key=lambda p: -p.points)
 scarce, lasts = wrs[12], wrs[13]
-scarce.points, scarce.adp = 300.0, 20.0
-lasts.points, lasts.adp = 300.0, 55.0
+scarce.points, scarce.adp, scarce.shrunk = 300.0, 20.0, None
+lasts.points, lasts.adp, lasts.shrunk = 300.0, 55.0, None
 attach_risk(players)  # projections changed, so ranks and spreads must be rebuilt
 state9 = make_state(
     picks=[

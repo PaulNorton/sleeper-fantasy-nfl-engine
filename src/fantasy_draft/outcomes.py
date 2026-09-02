@@ -42,20 +42,28 @@ NORM = NormalDist()
 # difference between rank 1 and rank 2 is not a factor of two in anything.
 RANK_OFFSET = 8.0
 
-# Log-scale of rank movement over a season, by position. Quarterbacks hold
-# their rank best; kickers and defences are close to noise year on year.
+# Log-scale of rank movement over a season, by position.
+#
+# Measured, not guessed: for the 2024 and 2025 seasons, the standard deviation
+# of log((actual_rank + OFFSET) / (projected_rank + OFFSET)) over players with
+# an ADP inside 250. That statistic is exactly this parameter, so it can be read
+# straight off a finished season. `tests/calibrate.py` reproduces it.
+#
+# These are lower bounds. Rank movement is measured inside a truncated pool, so
+# a projected RB1 cannot fall past the last ranked RB even though a real one
+# can. The values below are nudged up from the raw measurements for that reason.
 POSITION_SPREAD = {
-    "QB": 0.55,
-    "RB": 0.75,
-    "WR": 0.72,
-    "TE": 0.75,
-    "K": 0.85,
-    "DEF": 0.85,
-    "DL": 0.70,
-    "LB": 0.70,
-    "DB": 0.70,
+    "QB": 0.46,   # measured 0.42
+    "RB": 0.44,   # measured 0.40
+    "WR": 0.56,   # measured 0.52
+    "TE": 0.46,   # measured 0.42
+    "K": 0.46,    # measured 0.42
+    "DEF": 0.40,  # measured 0.35
+    "DL": 0.50,
+    "LB": 0.50,
+    "DB": 0.50,
 }
-DEFAULT_SPREAD = 0.72
+DEFAULT_SPREAD = 0.50
 
 ROOKIE_MULTIPLIER = 1.25
 

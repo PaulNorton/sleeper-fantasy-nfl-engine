@@ -106,16 +106,21 @@ class LineupEvaluator:
         lineup on its own projections; passing (projection, realised) scores the
         lineup a manager would have set, on what actually happened.
         Each pool must be sorted by ranking_key, descending.
+
+        A slot you have not drafted yet is scored at replacement level, not at
+        zero. That matters more than it sounds: an empty kicker slot valued at
+        zero makes drafting any kicker look worth his whole 78 points, when in
+        truth every team streams one off waivers for about the same. Treating
+        the empty slot as already holding a replacement player is what stops the
+        engine spending a sixth-round pick to fill it.
         """
         used: dict[str, int] = {}
         total = 0.0
         for pos, count in self.dedicated.items():
-            pool = pools.get(pos)
-            if not pool:
-                used[pos] = 0
-                continue
+            pool = pools.get(pos) or []
             take = min(count, len(pool))
             total += sum(payoff for _key, payoff in pool[:take])
+            total += (count - take) * self.replacement.get(pos, 0.0)
             used[pos] = take
         for _slot, count, eligible in self.flex:
             for _ in range(count):
@@ -130,7 +135,10 @@ class LineupEvaluator:
                         best_key = pool[i][0]
                         best_pos = pos
                 if best_pos is None:
-                    break
+                    total += max(
+                        (self.replacement.get(pos, 0.0) for pos in eligible), default=0.0
+                    )
+                    continue
                 total += pools[best_pos][used.get(best_pos, 0)][1]
                 used[best_pos] = used.get(best_pos, 0) + 1
         return total, used
@@ -140,12 +148,10 @@ class LineupEvaluator:
         used: dict[str, int] = {}
         total = 0.0
         for pos, count in self.dedicated.items():
-            lst = roster.get(pos)
-            if not lst:
-                used[pos] = 0
-                continue
+            lst = roster.get(pos) or []
             take = min(count, len(lst))
             total -= sum(lst[:take])  # stored negated for descending sort
+            total += (count - take) * self.replacement.get(pos, 0.0)
             used[pos] = take
         for _slot, count, eligible in self.flex:
             for _ in range(count):
@@ -160,7 +166,10 @@ class LineupEvaluator:
                         best_val = -lst[i]
                         best_pos = pos
                 if best_pos is None:
-                    break
+                    total += max(
+                        (self.replacement.get(pos, 0.0) for pos in eligible), default=0.0
+                    )
+                    continue
                 total += best_val
                 used[best_pos] = used.get(best_pos, 0) + 1
         return total, used

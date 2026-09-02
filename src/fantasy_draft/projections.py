@@ -18,6 +18,43 @@ NON_SCORING_KEYS = {"gp", "gms_active", "cmp_pct"}
 
 MISSING_ADP = 999.0
 
+# How much of a projection's distance from replacement to believe.
+#
+# The right factor is the regression slope of actual points on projected points,
+# not their correlation. Correlation answers "does this rank players correctly";
+# the slope answers "is the spread real", which is what a value model needs.
+# Using correlation here shrank quarterbacks by half and made the engine skip
+# them entirely in superflex.
+#
+# Measured over 2024 and 2025 for players with an ADP inside 250:
+#
+#   pos   corr        slope        verdict
+#   RB    0.76 0.75   1.16  1.07   spread is real, believe it
+#   TE    0.63 0.54   0.94  0.81   believe most of it
+#   WR    0.74 0.59   0.95  0.77   believe most of it
+#   QB    0.55 0.41   1.10  0.50   noisier, but the spread is real
+#   DEF   0.05 0.36   0.21  1.27   correlation near zero; slope meaningless
+#   K    -0.13 0.27  -0.67  2.19   correlation near zero; slope meaningless
+#
+# Kicker and defence slopes are unidentifiable: their projected spread is tiny
+# (sd 5-7 points) while their actual spread is large (sd 20-56), so the ratio is
+# noise, and the correlation says the ordering carries no information anyway.
+# For those two the slope is ignored and the projections are shrunk hard, which
+# is what stops the engine spending a sixth-round pick on a kicker who projects
+# ten points clear of the field.
+#
+# RB is capped at 1.0 rather than its measured 1.11. Amplifying a projection on
+# two seasons of evidence is not worth the risk.
+SHRINKAGE = {
+    "QB": 0.80,
+    "RB": 1.00,
+    "WR": 0.86,
+    "TE": 0.87,
+    "K": 0.15,
+    "DEF": 0.35,
+}
+DEFAULT_SHRINKAGE = 0.85
+
 # Positions Sleeper reports that no lineup slot accepts under their own name.
 POSITION_ALIAS = {"FB": "RB", "HB": "RB", "OLB": "LB", "ILB": "LB", "CB": "DB", "S": "DB", "DE": "DL", "DT": "DL"}
 
@@ -42,6 +79,7 @@ class Player:
     ecr: float | None = None
     rank_std: float = 0.0
     bye: int | None = None
+    shrunk: float | None = None               # projection pulled toward replacement
     spread: float = 0.0                       # log-scale of rank movement
     curve: list[float] = field(default_factory=list, repr=False)
 
@@ -66,8 +104,14 @@ class Player:
 
     @property
     def value(self) -> float:
-        """Projection after discounting for injury designation."""
-        return self.points * injury_multiplier(self.injury_status)
+        """The number the engine decides on.
+
+        The raw projection, shrunk toward replacement by how predictive
+        projections at this position have proven to be, then discounted for any
+        injury designation. `points` stays untouched for display.
+        """
+        base = self.points if self.shrunk is None else self.shrunk
+        return base * injury_multiplier(self.injury_status)
 
     @property
     def is_rookie(self) -> bool:
@@ -180,6 +224,39 @@ def replacement_levels(
     return levels
 
 
+def apply_reliability(players: list[Player], replacement: dict[str, float]) -> None:
+    """Scale each projection's distance from replacement by how much to believe it."""
+    for p in players:
+        anchor = replacement.get(p.position)
+        if anchor is None:
+            continue
+        factor = SHRINKAGE.get(p.position, DEFAULT_SHRINKAGE)
+        p.shrunk = anchor + factor * (p.points - anchor)
+
+
+def waiver_levels(
+    players: list[Player], ranks: dict[str, int], teams: int
+) -> dict[str, float]:
+    """What you get at each position if you never draft one.
+
+    Distinct from replacement level, and the distinction matters. Replacement is
+    the last *starter* league-wide - the right yardstick for value over
+    replacement. But a manager who drafts no quarterback does not end up with
+    the tenth-best quarterback; he ends up with whatever nobody drafted, half a
+    round deeper. Valuing an empty slot at replacement makes filling it look
+    worthless and the engine simply never fills it.
+    """
+    by_pos: dict[str, list[float]] = {}
+    for p in players:
+        by_pos.setdefault(p.position, []).append(p.value)
+    levels: dict[str, float] = {}
+    for pos, values in by_pos.items():
+        values.sort(reverse=True)
+        rank = ranks.get(pos, max(1, len(values) // 4)) + max(1, teams // 2)
+        levels[pos] = values[min(rank, len(values)) - 1]
+    return levels
+
+
 def apply_vorp(players: list[Player], levels: dict[str, float]) -> None:
     for p in players:
         p.vorp = round(p.points - levels.get(p.position, 0.0), 1)
@@ -241,6 +318,10 @@ def apply_overrides(players: list[Player], path: Path) -> int:
         try:
             if pts is not None:
                 target.points = float(pts)
+                # Your own projection replaces ours; do not re-shrink it. Leaving
+                # a stale shrunk value here would silently value a different
+                # player than the one you supplied.
+                target.shrunk = None
             if adp is not None:
                 target.adp = float(adp)
         except ValueError:
