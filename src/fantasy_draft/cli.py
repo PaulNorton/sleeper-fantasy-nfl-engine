@@ -7,11 +7,13 @@ from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from rich.live import Live
 from rich.table import Table
 from rich.text import Text
 
 from . import ui
+from .league import LeagueSettings
 from .recommend import recommend
 from .session import build_session, load_config, save_config
 from .simulate import RolloutConfig
@@ -266,6 +268,63 @@ def available(
                 str(p.bye or "—"),
             )
         console.print(table)
+
+
+@app.command()
+def backtest(
+    username: Optional[str] = U,
+    league_id: Optional[str] = L,
+    season: str = typer.Option("2025", "--season", help="A finished season to replay."),
+    reps: int = typer.Option(3, "--reps", help="Repetitions per draft slot."),
+    slots: Optional[str] = typer.Option(
+        None, "--slots", help="Comma-separated draft slots to test. Default is all."
+    ),
+    sims: int = typer.Option(120, "--sims", help="Simulations per pick while drafting."),
+    rounds: int = typer.Option(15, "--rounds", help="Rounds per draft."),
+    opponent: str = typer.Option("adp", "--opponent", help="Strategy the other seats use."),
+) -> None:
+    """Replay a finished season to see how the engine would have drafted.
+
+    Teams draft knowing only that season's preseason projections and ADP, then
+    rosters are scored on what really happened. Every strategy faces identical
+    drafts, so only the focal seat's choices differ.
+    """
+    from .backtest import prepare, report, run
+
+    cfg = load_config()
+    league_id = league_id or cfg.get("league_id")
+    if not league_id:
+        raise typer.BadParameter("need a league id to take the scoring rules from")
+    chosen = [int(x) for x in slots.split(",")] if slots else None
+
+    with SleeperClient() as client:
+        league_data = client.league(league_id)
+        if not league_data:
+            raise typer.BadParameter(f"no Sleeper league with id {league_id!r}")
+        league = LeagueSettings.from_api(league_data)
+        console.print(f"[dim]{league.name}: {league.describe()}[/]")
+        with console.status(f"loading {season} projections and results…"):
+            players, replacement, actual = prepare(client, league, season)
+        total = reps * len(chosen or range(league.teams)) * 4
+        done = {"n": 0}
+        with Progress(
+            SpinnerColumn(), TextColumn("{task.description}"), BarColumn(),
+            TextColumn("{task.completed}/{task.total}"), console=console,
+        ) as bar:
+            task = bar.add_task("drafting", total=total)
+
+            def tick(rep, slot, strategy):
+                done["n"] += 1
+                bar.update(task, completed=done["n"],
+                           description=f"rep {rep + 1} slot {slot} {strategy}")
+
+            results = run(
+                league, players, replacement, actual, reps=reps, slots=chosen,
+                rounds=rounds, cfg=RolloutConfig(sims=sims), opponent=opponent,
+                progress=tick,
+            )
+    console.print()
+    console.print(report(results, season))
 
 
 def _session(client, username, league_id, draft_id, season, slot, overrides=None,
