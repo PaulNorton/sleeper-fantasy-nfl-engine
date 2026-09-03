@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from rich.console import Group, RenderableType
 from rich.panel import Panel
 from rich.table import Table
@@ -53,11 +55,65 @@ def header(
     return line
 
 
-def recommendations_table(recs: list[Recommendation], width: int = 200) -> Table:
-    """Columns drop as the terminal narrows, most explanatory first."""
+def ago(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    if seconds < 3600:
+        return f"{seconds // 60:.0f}m {seconds % 60:.0f}s"
+    return f"{seconds // 3600:.0f}h {(seconds % 3600) // 60:.0f}m"
+
+
+def freshness(
+    picks_made: int,
+    fetched_at: float,
+    changed_at: float,
+    *,
+    edge_age: int = 0,
+    interval: float = 0.0,
+    error: str | None = None,
+) -> Text:
+    """The line that answers 'is what I am looking at current?'.
+
+    `edge_age` is the age Sleeper's CDN reported for the copy it served. It
+    should be zero because the live endpoints are fetched past the edge cache;
+    anything else means the board may be behind the draft, so say so.
+    """
+    now = time.time()
+    line = Text()
+    line.append(f"{picks_made} picks made", style="bold")
+    line.append(f" · read {time.strftime('%H:%M:%S', time.localtime(fetched_at))}")
+    line.append(f" ({ago(now - fetched_at)} ago)")
+    if edge_age > 0:
+        line.append(f" · CDN copy, {edge_age}s stale", style="yellow")
+    else:
+        line.append(" · live from Sleeper", style="green")
+    if picks_made:
+        line.append(f" · last new pick {ago(now - changed_at)} ago", style="dim")
+    if interval:
+        line.append(f" · polling every {interval:g}s", style="dim")
+    if error:
+        line.append(f"\nlast poll failed: {error}", style="red")
+    return line
+
+
+def recommendations_table(
+    recs: list[Recommendation],
+    width: int = 200,
+    alt: dict[str, list[Recommendation]] | None = None,
+) -> Table:
+    """Columns drop as the terminal narrows, most explanatory first.
+
+    `alt` adds one column per other strategy giving that strategy's rank for the
+    same player, so a candidate only one strategy likes is visible at a glance.
+    """
     best = recs[0].score if recs else 0.0
     detail = width >= 96
     why = width >= 118
+    alt = alt if alt and width >= 110 else {}
+    alt_rank = {
+        strat: {r.player.player_id: i + 1 for i, r in enumerate(rows)}
+        for strat, rows in alt.items()
+    }
 
     table = Table(header_style="bold", title_justify="left", pad_edge=False, padding=(0, 1))
     table.add_column("#", width=2, justify="right")
@@ -74,6 +130,8 @@ def recommendations_table(recs: list[Recommendation], width: int = 200) -> Table
     table.add_column("Back", width=4, justify="right")
     if detail:
         table.add_column("Tier", width=5, justify="center")
+    for strat in alt_rank:
+        table.add_column(STRATEGY_LABEL.get(strat, strat)[:4], width=4, justify="right")
     table.add_column("Cost", width=6, justify="right")
     if why:
         table.add_column("Why", overflow="fold")
@@ -89,6 +147,9 @@ def recommendations_table(recs: list[Recommendation], width: int = 200) -> Table
         row.append("—" if r.avail_next <= 0 else f"{r.avail_next:.0%}")
         if detail:
             row.append(f"T{r.tier}\u00b7{r.tier_left}")
+        for strat, ranks in alt_rank.items():
+            n = ranks.get(p.player_id)
+            row.append(Text("—", style="grey37") if n is None else Text(f"#{n}"))
         row.append(
             Text("best" if i == 1 else fmt_score(r.score - best), style="green" if i == 1 else "dim")
         )
@@ -269,6 +330,35 @@ def compare_verdict(results: dict[str, list[Recommendation]]) -> Text:
     return text
 
 
+def agreement(results: dict[str, list[Recommendation]], primary: str) -> Text:
+    """One line on whether the other strategies back the primary's top pick."""
+    tops = {s: rows[0].player for s, rows in results.items() if rows}
+    lead = tops.get(primary)
+    others = [(s, p) for s, p in tops.items() if s != primary]
+    if lead is None or not others:
+        return Text()
+    text = Text()
+    if all(p.player_id == lead.player_id for _, p in others):
+        text.append("AGREE: ", style="bold green")
+        text.append(f"all {len(tops)} strategies take {lead.name}", style="dim")
+        return text
+    text.append("SPLIT: ", style="bold yellow")
+    text.append(
+        ", ".join(
+            f"{STRATEGY_LABEL.get(s, s)} wants {p.name}"
+            for s, p in others
+            if p.player_id != lead.player_id
+        ),
+        style="dim",
+    )
+    text.append(
+        f" · this screen ranks by {STRATEGY_LABEL.get(primary, primary).lower()}; "
+        "a split is worth a second look",
+        style="dim",
+    )
+    return text
+
+
 def build_screen(
     league: LeagueSettings,
     state: DraftState,
@@ -280,17 +370,26 @@ def build_screen(
     roster_names: dict[int, str],
     on_clock: str | None,
     width: int = 200,
+    status: Text | None = None,
+    alt: dict[str, list[Recommendation]] | None = None,
+    primary: str = "lineup",
 ) -> RenderableType:
+    """The full report. `status` and `alt` are what watch adds: a freshness line
+    and the rival strategies' rankings alongside the primary one."""
     from rich.columns import Columns
 
     my_next = my_picks[0] if my_picks else None
     following = my_picks[1] if len(my_picks) > 1 else None
     current = my_next or state.current_pick
-    return Group(
-        header(league, state, my_next, on_clock),
-        Text(),
-        verdict(recs),
-        recommendations_table(recs, width),
+    others = {s: rows for s, rows in (alt or {}).items() if s != primary}
+    parts: list[RenderableType] = [header(league, state, my_next, on_clock)]
+    if status is not None:
+        parts.append(status)
+    parts += [Text(), verdict(recs)]
+    if others:
+        parts.append(agreement(alt or {}, primary))
+    parts += [
+        recommendations_table(recs, width, others),
         Columns(
             [
                 roster_panel(league, my_players),
@@ -303,7 +402,9 @@ def build_screen(
         Text(
             "Proj season points · VOR over replacement · Floor/Ceil 10th and 90th percentile "
             "season · Wait points lost if you pass on the position · Back P(available next "
-            "turn) · Cost expected points behind the best pick",
+            "turn) · Cost expected points behind the best pick"
+            + (" · Vona/Simu that strategy's own rank for the same player" if others else ""),
             style="dim",
         ),
-    )
+    ]
+    return Group(*parts)

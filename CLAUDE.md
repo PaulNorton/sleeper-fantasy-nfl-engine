@@ -41,6 +41,11 @@ changes every recommendation, so they are commented and grouped:
   5-second crawl delay, cache responses.
 - **Sleeper's `/league/{id}/drafts` returns abbreviated draft objects** with no
   `slot_to_roster_id`. Always re-fetch the chosen draft from `/draft/{id}`.
+- **Sleeper serves `/draft/{id}` and `/draft/{id}/picks` through Cloudflare**
+  with `stale-while-revalidate`, so a plain request just after a pick returns
+  the copy from before it. `SleeperClient._live` adds a unique query parameter
+  to reach the origin; a client `Cache-Control: no-cache` is ignored. Use it for
+  anything that must reflect the last pick, and nothing else.
 - **Sleeper user lookup takes a username handle, not an email**, and returns
   `200 null` rather than a 404 for a miss.
 - **Monte Carlo noise is the usual cause of a surprising ranking.** Simulating

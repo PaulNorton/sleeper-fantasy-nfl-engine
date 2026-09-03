@@ -247,25 +247,41 @@ def watch(
     no_consensus: bool = NOFP,
     strategy: str = STRAT,
     objective: str = OBJ,
-    interval: float = typer.Option(5.0, "--interval", "-i", help="Seconds between polls."),
+    interval: float = typer.Option(10.0, "--interval", "-i", help="Seconds between polls."),
     limit: int = typer.Option(12, "--limit", "-n", help="How many picks to show."),
 ) -> None:
-    """Follow the draft live and re-rank after every pick."""
+    """Follow the draft live and re-rank after every pick.
+
+    Every pick is ranked under all three strategies, so a disagreement shows up
+    while there is still time to think about it. The line under the header says
+    when the board was last read and whether it came straight from Sleeper.
+    """
     with SleeperClient() as client:
         session = _session(client, username, league_id, draft_id, season, slot,
                            projections, not no_consensus)
-        last = -1
-        with Live(_screen(session, limit, sims, risk, objective, strategy), console=console, screen=True,
-                  refresh_per_second=4) as live:
+        poll: dict = {"error": None}
+        results = _rank_all(session, limit, sims, risk, objective, strategy)
+        primary = "simulate" if objective == "win" else strategy
+
+        def render() -> object:
+            return _watch_screen(session, results, primary, limit, interval, poll["error"])
+
+        last = len(session.state.picks)
+        with Live(render(), console=console, screen=True, refresh_per_second=4) as live:
             while True:
                 time.sleep(interval)
                 try:
                     session.refresh_picks()
-                except SleeperError:
+                    poll["error"] = None
+                except SleeperError as exc:
+                    # Keep the last good board up; the status line says it is stale.
+                    poll["error"] = str(exc)
+                    live.update(render())
                     continue
                 if len(session.state.picks) != last:
                     last = len(session.state.picks)
-                    live.update(_screen(session, limit, sims, risk, objective, strategy))
+                    results = _rank_all(session, limit, sims, risk, objective, strategy)
+                live.update(render())
                 if session.state.status == "complete":
                     break
         console.print("[green]Draft complete.[/]")
@@ -391,6 +407,54 @@ def _session(client, username, league_id, draft_id, season, slot, overrides=None
     except SleeperError as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
+
+
+def _rank_all(session, limit: int, sims: int, risk: float | None, objective: str,
+              strategy: str) -> dict:
+    """Rank the board under every strategy at once.
+
+    Under --objective win only simulate is meaningful: beating the field can
+    only be judged by simulating the other rosters, so the other two are skipped
+    rather than shown with a number that does not mean what the column says.
+    """
+    strategies = ("simulate",) if objective == "win" else ("lineup", "vona", "simulate")
+    picks = session.my_picks(limit=8)
+    return {
+        strat: recommend(
+            session.league, session.state, session.players, session.replacement,
+            session.my_roster_id, picks, limit=limit,
+            cfg=RolloutConfig(sims=sims, risk=risk, objective=objective, strategy=strat),
+        )
+        for strat in strategies
+    }
+
+
+def _watch_screen(session, results: dict, primary: str, limit: int, interval: float,
+                  error: str | None):
+    picks = session.my_picks(limit=8)
+    status = ui.freshness(
+        len(session.state.picks),
+        session.fetched_at,
+        session.changed_at,
+        edge_age=session.edge_age,
+        interval=interval,
+        error=error,
+    )
+    return ui.build_screen(
+        session.league,
+        session.state,
+        results[primary],
+        session.my_players(),
+        picks,
+        session.available(),
+        session.by_id,
+        session.roster_names,
+        session.on_clock(),
+        console.width,
+        status=status,
+        alt=results,
+        primary=primary,
+    )
 
 
 def _screen(session, limit: int, sims: int = 300, risk: float | None = None,

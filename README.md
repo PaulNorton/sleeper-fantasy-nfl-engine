@@ -95,10 +95,25 @@ The same board, refreshed as the draft happens. Takes every `board` flag plus:
 
 | Flag | Default | What it does |
 |---|---|---|
-| `--interval`, `-i` | 5.0 | Seconds between polls. It only re-ranks when a pick is actually made. |
+| `--interval`, `-i` | 10.0 | Seconds between polls. It only re-ranks when a pick is actually made. |
+
+Every pick is ranked under all three strategies. The board is ordered by
+`--strategy`, and two extra columns give what `vona` and `simulate` made of the
+same player, so a candidate only one strategy likes is visible without leaving
+the screen. A line above the table says whether they agree on the top pick.
+Under `--objective win` only `simulate` runs, since the other two cannot measure
+a share of the title odds.
+
+The line under the header answers "am I looking at the current board": how many
+picks are in, when the draft was last read, how long ago the last new pick
+landed, and whether the read came straight from Sleeper. A failed poll leaves
+the last good board up and says so in red rather than blanking the screen.
 
 Safe to start before the draft opens: it re-reads the pick order every poll, so
 it picks up a randomised order at kickoff.
+
+Ranking three strategies costs roughly three times one. If a poll takes too long
+between picks, drop `--sims`; it only affects `simulate`.
 
 ### `fdraft compare`
 
@@ -467,7 +482,14 @@ project.
 ## Data sources
 
 - **Sleeper** for the league, the live draft, projected stat lines and ADP. No
-  authentication needed.
+  authentication needed. The draft and its picks are fetched past Sleeper's CDN
+  with a unique query parameter. Those two endpoints are served `public,
+  s-maxage=..., stale-while-revalidate=300`, so a plain request in the seconds
+  after a pick gets the copy from before it — the board appears to flick between
+  behind and current. Cloudflare ignores a client `Cache-Control: no-cache`
+  there but keys on the full URL, so the parameter is what reaches the origin.
+  Everything else — league, rosters, users, projections — still takes the cached
+  copy, on-disk here as well as at the edge.
 - **FantasyPros** for expert consensus rank, expert disagreement and bye weeks,
   read from the public cheatsheet pages. Those pages are not under any path
   disallowed by their robots.txt, requests identify themselves honestly and the

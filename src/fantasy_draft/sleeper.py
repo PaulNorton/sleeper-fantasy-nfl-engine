@@ -32,6 +32,9 @@ class SleeperClient:
         self._client = httpx.Client(
             timeout=timeout, headers={"User-Agent": "fantasy-draft/0.1"}
         )
+        # Freshness of the last network response, for the watch screen to show.
+        self.last_fetch_at: float = 0.0
+        self.last_edge_age: int = 0
 
     def close(self) -> None:
         self._client.close()
@@ -65,10 +68,25 @@ class SleeperClient:
             if path.exists():
                 return json.loads(path.read_text())
             raise SleeperError(f"HTTP {resp.status_code} from {url}")
+        self.last_fetch_at = time.time()
+        self.last_edge_age = int(resp.headers.get("age") or 0)
         data = resp.json()
         if ttl > 0:
             path.write_text(json.dumps(data))
         return data
+
+    def _live(self, url: str) -> Any:
+        """GET past Sleeper's CDN, for data that must reflect the last pick.
+
+        Sleeper serves these endpoints with `public, s-maxage=..,
+        stale-while-revalidate=300`, so Cloudflare answers the first request
+        after a pick with the copy from before it and only then refreshes in the
+        background. That reads as the board flicking between behind and current.
+        Cloudflare ignores a client `Cache-Control: no-cache` here, but it keys
+        on the full URL, so a unique parameter reaches the origin. The API
+        ignores unknown parameters.
+        """
+        return self._get(url, params=[("_", str(time.time_ns()))], ttl=0)
 
     # ---------- endpoints ----------
 
@@ -94,10 +112,10 @@ class SleeperClient:
         return self._get(f"{V1}/league/{league_id}/drafts", ttl=60) or []
 
     def draft(self, draft_id: str) -> dict | None:
-        return self._get(f"{V1}/draft/{draft_id}", ttl=0)
+        return self._live(f"{V1}/draft/{draft_id}")
 
     def draft_picks(self, draft_id: str) -> list[dict]:
-        return self._get(f"{V1}/draft/{draft_id}/picks", ttl=0) or []
+        return self._live(f"{V1}/draft/{draft_id}/picks") or []
 
     def traded_picks(self, draft_id: str) -> list[dict]:
         return self._get(f"{V1}/draft/{draft_id}/traded_picks", ttl=60) or []

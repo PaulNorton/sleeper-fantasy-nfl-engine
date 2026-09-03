@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -46,12 +47,18 @@ class Session:
     my_roster_id: int | None = None
     roster_names: dict[int, str] = field(default_factory=dict)
 
+    # Freshness, so the watch screen can say whether the board is current.
+    fetched_at: float = field(default_factory=time.time)   # last draft read
+    changed_at: float = field(default_factory=time.time)   # last read that moved
+    edge_age: int = 0                                      # CDN age of that read
+
     @property
     def by_id(self) -> dict[str, Player]:
         return {p.player_id: p for p in self.players}
 
     def refresh_picks(self) -> None:
         """Re-read the draft. The pick order can still change until it starts."""
+        before = len(self.state.picks)
         self.state.picks = self.client.draft_picks(self.state.draft_id)
         draft = self.client.draft(self.state.draft_id) or {}
         if draft.get("status"):
@@ -65,6 +72,10 @@ class Session:
         if self.user_id and self.user_id in self.state.draft_order:
             slot = self.state.draft_order[self.user_id]
             self.my_roster_id = self.state.slot_to_roster.get(slot, self.my_roster_id)
+        self.fetched_at = time.time()
+        self.edge_age = self.client.last_edge_age
+        if len(self.state.picks) != before:
+            self.changed_at = self.fetched_at
 
     def available(self) -> list[Player]:
         drafted = self.state.drafted_ids()
@@ -145,6 +156,9 @@ def build_session(
     season = season or league.season or str(draft.get("season") or "")
 
     picks = client.draft_picks(str(draft["draft_id"]))
+    # Read the freshness of that call now; later fetches overwrite it.
+    fetched_at = client.last_fetch_at or time.time()
+    edge_age = client.last_edge_age
     traded = client.traded_picks(str(draft["draft_id"]))
     state = DraftState.from_api(draft, picks, traded)
 
@@ -193,4 +207,7 @@ def build_session(
         user_id=uid,
         my_roster_id=my_roster_id,
         roster_names=roster_names,
+        fetched_at=fetched_at,
+        changed_at=fetched_at,
+        edge_age=edge_age,
     )
