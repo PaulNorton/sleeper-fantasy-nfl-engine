@@ -100,6 +100,35 @@ H11 - RB shrinkage uncapping: SHRINKAGE["RB"] was capped at 1.00 out of caution
 The data-layer explanation does not hold up. Robust RB stands as a genuine,
 position-specific exception to "trust the marginal-value system," not a proxy
 for a calibration constant that could replace it.
+
+H12 - Leave a starter slot empty and stream it. You do not have to fill every
+      role: an unfilled slot can be covered off waivers all season, so the pick
+      it costs might be better spent on another skill player. Tested as a ban on
+      drafting the position at all, which is the *most* this theory can change -
+      any softer version, such as lifting the empty-slot floor toward the best
+      player left, can only drive that player's marginal value to zero, and zero
+      ties with the deep bench body it would be taken over.
+      REJECTED, at every position, and the loss grows with how much the slot is
+      worth. Over 240 paired drafts: K and DEF together -3.3 +/- 1.3 (t=-2.61),
+      K alone -5.2 +/- 1.1 (t=-4.78), DEF alone -6.2 +/- 1.1 (t=-5.49),
+      TE -30.2 +/- 5.2 (t=-5.83), QB -25.0 +/- 3.5 (t=-7.08).
+
+      The control is what makes the result readable. `stream_free` lifts the
+      harness rule that forces every team to end with a kicker and a defence,
+      and changes nothing else: +0.2 +/- 0.7 (t=0.26). So the rule was never
+      binding. The engine already prices an unfilled slot at the waiver wire -
+      that is what waiver_levels and the seat() floor are for - and, given the
+      board in the last two rounds, it fills those slots by choice. The theory was already implemented; it just does not pay to push
+      it further.
+
+      Why filling wins is worth stating, because it is not obvious. A drafted
+      starter is floored at the same waiver level as an empty slot, so he can
+      only add points, while the player taken instead is a fourteenth-rounder
+      sitting below the waiver line, worth roughly nothing at a BENCH_FACTOR of
+      0.09. A last-round pick buys a free option on the upside or it buys
+      nothing. Note this cuts in favour of drafting, so the backtest is if
+      anything biased *toward* the theory it rejects - and the theory still
+      loses.
 """
 
 import math
@@ -114,7 +143,8 @@ SEASONS = ("2025", "2024")
 STRATEGIES = (
     "greedy", "reach_averse", "ceiling_bench",
     "posbonus_wr", "posbonus_te", "posbonus_qb", "tier_cliff",
-    "handcuff",
+    "handcuff", "stream_kd", "stream_k", "stream_def", "stream_te",
+    "stream_qb", "stream_free",
 )
 
 
@@ -133,7 +163,7 @@ def main() -> None:
                 pooled[s].extend(res[s].points)
 
         print(f"\npooled {len(pooled['greedy'])} paired drafts, baseline = greedy (shipped lineup)")
-        for h in ("reach_averse", "ceiling_bench", "posbonus_wr", "posbonus_te", "posbonus_qb", "tier_cliff", "handcuff"):
+        for h in STRATEGIES[1:]:
             diffs = [a - b for a, b in zip(pooled[h], pooled["greedy"])]
             mean = statistics.mean(diffs)
             err = statistics.stdev(diffs) / math.sqrt(len(diffs))

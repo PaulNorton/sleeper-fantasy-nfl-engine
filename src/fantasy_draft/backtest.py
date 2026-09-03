@@ -85,6 +85,25 @@ HANDCUFF_VALUE_RATIO = 1.5
 RUN_WINDOW_ROUNDS = 1.0
 RUN_LAMBDA = 0.5
 
+# H12: leave a starter slot empty and stream it. The lineup model already
+# prices an unfilled slot at the waiver wire, but the draft harness overrides
+# that by forcing every team to end with a kicker and a defence. These variants
+# lift the requirement for the focal seat and spend those picks elsewhere,
+# which is the blunt form of "you do not have to fill every role".
+SKIP_POSITIONS: dict[str, tuple[str, ...]] = {
+    "stream_kd": ("K", "DEF"),
+    "stream_k": ("K",),
+    "stream_def": ("DEF",),
+    # The stronger form of the same theory: punt a real skill slot and stream
+    # it all season, rather than only the two positions nobody defends.
+    "stream_te": ("TE",),
+    "stream_qb": ("QB",),
+}
+
+# The control for H12. It bans nothing and changes no number; it only lifts the
+# harness requirement, which separates "the rule was forcing the pick" from "the
+# valuation wanted the pick anyway".
+STREAM_FREE = "stream_free"
 
 
 @dataclass
@@ -158,6 +177,8 @@ def market_order(players: list[Player], seed: int) -> list[Player]:
 
 def _allowed(team: Team, player: Player, league: LeagueSettings, rounds_left: int) -> bool:
     counts = team.counts()
+    if player.position in SKIP_POSITIONS.get(team.strategy, ()):
+        return False
     if counts.get(player.position, 0) >= CAPS.get(player.position, 6):
         return False
     # Do not burn an early pick on a kicker or defence.
@@ -169,7 +190,14 @@ def _allowed(team: Team, player: Player, league: LeagueSettings, rounds_left: in
 def _forced_fill(team: Team, league: LeagueSettings, rounds_left: int) -> str | None:
     """A mandatory slot that must be filled before the draft ends."""
     counts = team.counts()
+    if team.strategy == STREAM_FREE:
+        return None  # the control leaves the choice entirely to the valuation
+    # Only the position under test is exempt. A punt-TE variant still fills its
+    # kicker and defence like the baseline, so the comparison isolates one slot.
+    skip = SKIP_POSITIONS.get(team.strategy, ())
     for pos in ("K", "DEF"):
+        if pos in skip:
+            continue
         need = league.starter_slots.get(pos, 0) - counts.get(pos, 0)
         if need > 0 and rounds_left <= need:
             return pos
@@ -204,7 +232,7 @@ def baseline_pick(
         "greedy", "blind", "vona", "reach_averse", "ceiling_bench",
         "posbonus_wr", "posbonus_te", "posbonus_qb", "tier_cliff",
         "handcuff", "run_aware",
-    )
+    ) + tuple(SKIP_POSITIONS) + (STREAM_FREE,)
     if team.strategy in lineup_family:
         # The engine's lineup model with no simulation: take whoever adds most to
         # the starting lineup right now. Isolates what the rollout is worth.
@@ -308,7 +336,8 @@ def baseline_pick(
 
             return max(legal[:60], key=score_ceiling)
 
-        if team.strategy in ("greedy", "blind"):
+        if team.strategy in ("greedy", "blind") or team.strategy in SKIP_POSITIONS \
+                or team.strategy == STREAM_FREE:
             # "blind" drafts ignoring bye weeks; it is scored with the same bye
             # penalty as everyone else, so the pair measures what byes are worth.
             if team.strategy == "blind":

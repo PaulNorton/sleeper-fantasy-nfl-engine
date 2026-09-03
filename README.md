@@ -371,6 +371,27 @@ toward its measured 1.11 (flat at best, worse elsewhere). None replicated
 Robust RB's effect. It stands as a genuine, position-specific exception, not a
 proxy for a calibration constant that could substitute for it.
 
+**You do not have to fill every role - and the engine already knew.** A slot
+left empty can be covered off waivers all season, so the pick it costs might be
+better spent elsewhere. Tested as a ban on drafting the position at all, which
+is the most the idea can change: any softer version, such as lifting the
+empty-slot floor toward the best player left, only drives that player's marginal
+value to zero, and zero ties with the deep bench body it would be taken over.
+Rejected at every position, and the loss grows with what the slot is worth -
+over 240 paired drafts, K and DEF together lost 3.3 ± 1.3 (t = -2.61), K alone
+5.2 ± 1.1 (t = -4.78), DEF alone 6.2 ± 1.1 (t = -5.49), punting TE 30.2 ± 5.2
+(t = -5.83) and punting QB 25.0 ± 3.5 (t = -7.08).
+
+The control carries the result. Lifting the backtest rule that forces every team
+to end with a kicker and a defence, and changing nothing else, moved the score
+by +0.2 ± 0.7 (t = 0.26). The rule was never binding: `waiver_levels` and the
+`seat()` floor already price an unfilled slot at the waiver wire, and given the
+board in the last two rounds the engine fills those slots by choice. Filling
+wins because a drafted starter is floored at the same waiver level as an empty
+slot, so he can only add points, while the fourteenth-rounder taken instead sits
+below the waiver line and is worth roughly nothing. That asymmetry favours
+drafting, so the test is biased toward the theory it rejects.
+
 Two seasons is a thin basis and the season-to-season swing is large - `lineup`
 beat `vona` by 117 points in 2025 and lost to it by 34 in 2024.
 
@@ -465,7 +486,9 @@ PYTHONPATH=tests .venv/bin/python tests/hypotheses.py
 ```
 
 Reproduces the strategy-improvement hypotheses tested against the shipped
-engine: one kept (Robust RB), two rejected (reach-aversion, ceiling-chasing).
+engine: one kept (Robust RB), the rest rejected - reach-aversion,
+ceiling-chasing, tier cliffs, handcuffing, draft-run detection, and leaving a
+starter slot empty to stream it.
 
 ```bash
 PYTHONPATH=tests .venv/bin/python tests/calibrate.py
