@@ -371,26 +371,33 @@ toward its measured 1.11 (flat at best, worse elsewhere). None replicated
 Robust RB's effect. It stands as a genuine, position-specific exception, not a
 proxy for a calibration constant that could substitute for it.
 
-**You do not have to fill every role - and the engine already knew.** A slot
-left empty can be covered off waivers all season, so the pick it costs might be
-better spent elsewhere. Tested as a ban on drafting the position at all, which
-is the most the idea can change: any softer version, such as lifting the
-empty-slot floor toward the best player left, only drives that player's marginal
-value to zero, and zero ties with the deep bench body it would be taken over.
-Rejected at every position, and the loss grows with what the slot is worth -
-over 240 paired drafts, K and DEF together lost 3.3 ± 1.3 (t = -2.61), K alone
-5.2 ± 1.1 (t = -4.78), DEF alone 6.2 ± 1.1 (t = -5.49), punting TE 30.2 ± 5.2
-(t = -5.83) and punting QB 25.0 ± 3.5 (t = -7.08).
+**You do not have to fill every role - for the defence.** A slot left empty can
+be covered off waivers all season, so the pick it costs might be better spent
+elsewhere. The verdict splits by how much a position's projections are worth.
+Punting a slot the projections understand is expensive: over 240 paired drafts,
+punting TE lost 30.2 ± 5.2 (t = -5.83) and punting QB lost 25.0 ± 3.5
+(t = -7.08). Skipping the defence gained 3.6 ± 0.8 (t = 4.39). Skipping the
+kicker was neutral (+2.8 ± 1.8, t = 1.56).
 
-The control carries the result. Lifting the backtest rule that forces every team
-to end with a kicker and a defence, and changing nothing else, moved the score
-by +0.2 ± 0.7 (t = 0.26). The rule was never binding: `waiver_levels` and the
-`seat()` floor already price an unfilled slot at the waiver wire, and given the
-board in the last two rounds the engine fills those slots by choice. Filling
-wins because a drafted starter is floored at the same waiver level as an empty
-slot, so he can only add points, while the fourteenth-rounder taken instead sits
-below the waiver line and is worth roughly nothing. That asymmetry favours
-drafting, so the test is biased toward the theory it rejects.
+**That result needed a control, and the first version of the test lacked one.**
+A strategy that skips the defence frees its round-14 pick and takes its kicker a
+round early, drawing from a pool of about thirty kickers whose realised seasons
+swing 40 points and whose projections predict nothing. The two arms drafted
+kickers projected 72.1 and 72.8 whose actual seasons differed by 41 points - an
+artifact larger than the effect being measured, and enough to reverse its sign.
+Holding the kicker to the final round in both arms, verified to draft the same
+kicker in 10 of 10 seats, is what produces the +3.6. Any experiment that shifts
+behaviour in rounds 14-15 is exposed to this; a sweep of `SHRINKAGE["DEF"]` was
+contaminated the same way.
+
+The cause is not that the engine believes defence projections. At a shrinkage of
+zero, where every defence is worth exactly replacement level, it still drafts
+one: by the final picks every candidate has a marginal value near zero and the
+ranking breaks the tie by board order. With the roster held fixed the defence
+pick is worth 1.4 blended points and the last skill pick 8.4. The model is
+indifferent where the season is not. Not yet shipped - the fix is a tie-break
+among near-zero candidates rather than a constant, and the gain rests on scoring
+an unfilled defence slot at the 10th-best defence's actual season.
 
 Two seasons is a thin basis and the season-to-season swing is large - `lineup`
 beat `vona` by 117 points in 2025 and lost to it by 34 in 2024.

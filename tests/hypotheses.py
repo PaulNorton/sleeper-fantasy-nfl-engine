@@ -103,32 +103,46 @@ for a calibration constant that could replace it.
 
 H12 - Leave a starter slot empty and stream it. You do not have to fill every
       role: an unfilled slot can be covered off waivers all season, so the pick
-      it costs might be better spent on another skill player. Tested as a ban on
-      drafting the position at all, which is the *most* this theory can change -
-      any softer version, such as lifting the empty-slot floor toward the best
-      player left, can only drive that player's marginal value to zero, and zero
-      ties with the deep bench body it would be taken over.
-      REJECTED, at every position, and the loss grows with how much the slot is
-      worth. Over 240 paired drafts: K and DEF together -3.3 +/- 1.3 (t=-2.61),
-      K alone -5.2 +/- 1.1 (t=-4.78), DEF alone -6.2 +/- 1.1 (t=-5.49),
-      TE -30.2 +/- 5.2 (t=-5.83), QB -25.0 +/- 3.5 (t=-7.08).
+      it costs might be better spent on another skill player.
+      SPLIT VERDICT, and the split tracks projection skill.
 
-      The control is what makes the result readable. `stream_free` lifts the
-      harness rule that forces every team to end with a kicker and a defence,
-      and changes nothing else: +0.2 +/- 0.7 (t=0.26). So the rule was never
-      binding. The engine already prices an unfilled slot at the waiver wire -
-      that is what waiver_levels and the seat() floor are for - and, given the
-      board in the last two rounds, it fills those slots by choice. The theory was already implemented; it just does not pay to push
-      it further.
+      Punting a slot whose projections carry information is expensive. Over 240
+      paired drafts, TE -30.2 +/- 5.2 (t=-5.83) and QB -25.0 +/- 3.5 (t=-7.08).
 
-      Why filling wins is worth stating, because it is not obvious. A drafted
-      starter is floored at the same waiver level as an empty slot, so he can
-      only add points, while the player taken instead is a fourteenth-rounder
-      sitting below the waiver line, worth roughly nothing at a BENCH_FACTOR of
-      0.09. A last-round pick buys a free option on the upside or it buys
-      nothing. Note this cuts in favour of drafting, so the backtest is if
-      anything biased *toward* the theory it rejects - and the theory still
-      loses.
+      Skipping the defence pays: +3.6 +/- 0.8 (t=4.39) over 240 paired drafts.
+      Skipping the kicker is neutral: swapping him for the best free skill
+      player, holding the rest of the roster fixed, is +2.8 +/- 1.8 (t=1.56).
+
+      Getting that right needs a control, and the first version of this test did
+      not have one. A strategy that skips the defence frees its round-14 pick and
+      takes its kicker a round early, drawing from a pool of about thirty kickers
+      whose realised seasons swing 40 points and whose projections predict
+      nothing (SHRINKAGE["K"] = 0.15, measured correlation -0.13). Measured
+      directly: the two arms drafted kickers with near-identical projections
+      (72.1 vs 72.8) whose actual seasons differed by 41 points. That artifact is
+      larger than the effect under test, and it reversed its sign - the
+      uncontrolled comparison read -6.2 +/- 1.1 against skipping. Holding the
+      kicker to the final round in both arms (stream_def_lateK, verified to draft
+      the same kicker in 10 of 10 seats) gives the +3.6 above.
+
+      Any experiment that shifts what happens in rounds 14-15 is exposed to this.
+      A sweep of SHRINKAGE["DEF"] appeared to show that trusting defence
+      projections less costs 5 points; it does not. Lowering the constant makes
+      the engine take its kicker at 14, after which _forced_fill supplies a
+      defence at 15 anyway, so the sweep measured the kicker lottery too.
+
+      The cause is not miscalibration. At shrinkage 0.0 every defence is worth
+      exactly replacement level and the engine still drafts one, because by the
+      final picks every candidate has a marginal value near zero and max() breaks
+      the tie by board order. Measured with the roster held fixed, the defence
+      pick is worth 1.4 blended points and the last skill pick 8.4 - the model is
+      indifferent where the season is not, and indifference chooses badly.
+
+      Not shipped yet: the fix is a tie-break among near-zero candidates, not a
+      constant, and the +3.6 rests on scoring an unfilled defence slot at the
+      10th-best defence's actual season - the assumption that streaming reaches
+      DEF10. That is the least validated number in the comparison and it is the
+      "in-season additions" gap the README already flags.
 """
 
 import math
@@ -144,7 +158,7 @@ STRATEGIES = (
     "greedy", "reach_averse", "ceiling_bench",
     "posbonus_wr", "posbonus_te", "posbonus_qb", "tier_cliff",
     "handcuff", "stream_kd", "stream_k", "stream_def", "stream_te",
-    "stream_qb", "stream_free",
+    "stream_qb", "stream_free", "stream_def_lateK",
 )
 
 

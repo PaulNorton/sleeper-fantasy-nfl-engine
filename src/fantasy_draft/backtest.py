@@ -98,7 +98,23 @@ SKIP_POSITIONS: dict[str, tuple[str, ...]] = {
     # it all season, rather than only the two positions nobody defends.
     "stream_te": ("TE",),
     "stream_qb": ("QB",),
+    # Skips the defence but is held to the final round for its kicker, exactly
+    # like the baseline. Without that, skipping DEF frees the round-14 pick and
+    # the variant takes its kicker a round early, drawing a different one from a
+    # pool of about thirty whose realised scores swing by 40 points and whose
+    # projections predict nothing. That swing is larger than the effect under
+    # test, so the unconstrained comparison measures the kicker lottery.
+    "stream_def_lateK": ("DEF",),
 }
+
+# Strategies barred from taking a kicker before the last round, so that the
+# kicker pick lands on the same board as the baseline's.
+LATE_KICKER = ("stream_def_lateK", "unforced_lateK")
+
+# Fills nothing by rule and takes its kicker last: the shipped valuation, left
+# to decide the defence on its own. Used to test a calibration change, where the
+# question is what the model chooses rather than what a ban imposes.
+UNFORCED = "unforced_lateK"
 
 # The control for H12. It bans nothing and changes no number; it only lifts the
 # harness requirement, which separates "the rule was forcing the pick" from "the
@@ -179,6 +195,8 @@ def _allowed(team: Team, player: Player, league: LeagueSettings, rounds_left: in
     counts = team.counts()
     if player.position in SKIP_POSITIONS.get(team.strategy, ()):
         return False
+    if player.position == "K" and team.strategy in LATE_KICKER and rounds_left > 1:
+        return False
     if counts.get(player.position, 0) >= CAPS.get(player.position, 6):
         return False
     # Do not burn an early pick on a kicker or defence.
@@ -190,7 +208,7 @@ def _allowed(team: Team, player: Player, league: LeagueSettings, rounds_left: in
 def _forced_fill(team: Team, league: LeagueSettings, rounds_left: int) -> str | None:
     """A mandatory slot that must be filled before the draft ends."""
     counts = team.counts()
-    if team.strategy == STREAM_FREE:
+    if team.strategy in (STREAM_FREE, UNFORCED):
         return None  # the control leaves the choice entirely to the valuation
     # Only the position under test is exempt. A punt-TE variant still fills its
     # kicker and defence like the baseline, so the comparison isolates one slot.
@@ -232,7 +250,7 @@ def baseline_pick(
         "greedy", "blind", "vona", "reach_averse", "ceiling_bench",
         "posbonus_wr", "posbonus_te", "posbonus_qb", "tier_cliff",
         "handcuff", "run_aware",
-    ) + tuple(SKIP_POSITIONS) + (STREAM_FREE,)
+    ) + tuple(SKIP_POSITIONS) + (STREAM_FREE, UNFORCED)
     if team.strategy in lineup_family:
         # The engine's lineup model with no simulation: take whoever adds most to
         # the starting lineup right now. Isolates what the rollout is worth.
@@ -337,7 +355,7 @@ def baseline_pick(
             return max(legal[:60], key=score_ceiling)
 
         if team.strategy in ("greedy", "blind") or team.strategy in SKIP_POSITIONS \
-                or team.strategy == STREAM_FREE:
+                or team.strategy in (STREAM_FREE, UNFORCED):
             # "blind" drafts ignoring bye weeks; it is scored with the same bye
             # penalty as everyone else, so the pair measures what byes are worth.
             if team.strategy == "blind":
