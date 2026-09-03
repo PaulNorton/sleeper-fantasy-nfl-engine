@@ -104,16 +104,27 @@ the screen. A line above the table says whether they agree on the top pick.
 Under `--objective win` only `simulate` runs, since the other two cannot measure
 a share of the title odds.
 
+The three do not cost the same. `lineup` and `vona` are closed-form and rank in
+about 0.1s; `simulate` plays the rest of the draft out and takes seconds — 15s
+on a full pre-draft board at `--sims 300`. So the board paints from the fast two
+straight away and `simulate` runs on a worker thread behind it. Its column shows
+`…` until the first result lands, and `Simu*` in yellow while it describes an
+earlier pick. The agreement line ignores it while it is behind rather than
+claiming a consensus from a stale ranking.
+
 The line under the header answers "am I looking at the current board": how many
 picks are in, when the draft was last read, how long ago the last new pick
-landed, and whether the read came straight from Sleeper. A failed poll leaves
-the last good board up and says so in red rather than blanking the screen.
+landed, whether the read came straight from Sleeper, and how current the
+simulate column is — `simulate current`, `simulate ranking 7s, column 1 pick
+behind`, or `simulate failed: …`. It ticks once a second, not once a poll. A
+failed poll leaves the last good board up and says so in red rather than
+blanking the screen.
 
 Safe to start before the draft opens: it re-reads the pick order every poll, so
 it picks up a randomised order at kickoff.
 
-Ranking three strategies costs roughly three times one. If a poll takes too long
-between picks, drop `--sims`; it only affects `simulate`.
+If `simulate` lags more than a pick behind, drop `--sims`; it affects that
+strategy only, and the rest of the board is unaffected by the wait.
 
 ### `fdraft compare`
 

@@ -96,23 +96,64 @@ def freshness(
     return line
 
 
+def simulate_note(
+    picks_made: int,
+    ranked_at: int | None,
+    running_since: float | None = None,
+    error: str | None = None,
+) -> Text:
+    """How current the simulate column is.
+
+    It ranks in seconds, not milliseconds, so it lands a beat after the rest of
+    the board. `ranked_at` is the pick count it last finished on; comparing that
+    with `picks_made` says whether the column describes the board on screen.
+    """
+    text = Text()
+    if error:
+        text.append(" · simulate failed: ", style="red")
+        text.append(error, style="red")
+        return text
+    if running_since is not None:
+        behind = picks_made - ranked_at if ranked_at is not None else None
+        text.append(f" · simulate ranking {ago(time.time() - running_since)}", style="yellow")
+        if behind:
+            text.append(f", column {behind} pick{'s' if behind > 1 else ''} behind", style="yellow")
+        elif ranked_at is None:
+            text.append(", no column yet", style="yellow")
+        return text
+    if ranked_at is None:
+        text.append(" · simulate not run", style="dim")
+    elif ranked_at != picks_made:
+        behind = picks_made - ranked_at
+        text.append(f" · simulate {behind} pick{'s' if behind > 1 else ''} behind", style="yellow")
+    else:
+        text.append(" · simulate current", style="green")
+    return text
+
+
 def recommendations_table(
     recs: list[Recommendation],
     width: int = 200,
     alt: dict[str, list[Recommendation]] | None = None,
+    columns: tuple[str, ...] = (),
+    stale: tuple[str, ...] = (),
 ) -> Table:
     """Columns drop as the terminal narrows, most explanatory first.
 
-    `alt` adds one column per other strategy giving that strategy's rank for the
-    same player, so a candidate only one strategy likes is visible at a glance.
+    `columns` names the other strategies to show a rank column for, giving that
+    strategy's own rank for the same player. A column listed there but missing
+    from `alt` is still being computed and shows as an ellipsis; one named in
+    `stale` describes an earlier pick and is marked and dimmed rather than
+    quietly passed off as current.
     """
     best = recs[0].score if recs else 0.0
     detail = width >= 96
     why = width >= 118
-    alt = alt if alt and width >= 110 else {}
+    alt = alt or {}
+    show = list(columns) if width >= 110 else []
     alt_rank = {
-        strat: {r.player.player_id: i + 1 for i, r in enumerate(rows)}
-        for strat, rows in alt.items()
+        strat: {r.player.player_id: i + 1 for i, r in enumerate(alt.get(strat) or [])}
+        for strat in show
     }
 
     table = Table(header_style="bold", title_justify="left", pad_edge=False, padding=(0, 1))
@@ -130,8 +171,9 @@ def recommendations_table(
     table.add_column("Back", width=4, justify="right")
     if detail:
         table.add_column("Tier", width=5, justify="center")
-    for strat in alt_rank:
-        table.add_column(STRATEGY_LABEL.get(strat, strat)[:4], width=4, justify="right")
+    for strat in show:
+        label = STRATEGY_LABEL.get(strat, strat)[:4]
+        table.add_column(f"{label}*" if strat in stale else label, width=5, justify="right")
     table.add_column("Cost", width=6, justify="right")
     if why:
         table.add_column("Why", overflow="fold")
@@ -147,9 +189,13 @@ def recommendations_table(
         row.append("—" if r.avail_next <= 0 else f"{r.avail_next:.0%}")
         if detail:
             row.append(f"T{r.tier}\u00b7{r.tier_left}")
-        for strat, ranks in alt_rank.items():
-            n = ranks.get(p.player_id)
-            row.append(Text("—", style="grey37") if n is None else Text(f"#{n}"))
+        for strat in show:
+            if strat not in alt:
+                row.append(Text("…", style="grey37"))
+                continue
+            n = alt_rank[strat].get(p.player_id)
+            style = "yellow" if strat in stale else ""
+            row.append(Text("—", style="grey37") if n is None else Text(f"#{n}", style=style))
         row.append(
             Text("best" if i == 1 else fmt_score(r.score - best), style="green" if i == 1 else "dim")
         )
@@ -247,6 +293,7 @@ def recent_panel(state: DraftState, by_id: dict[str, Player], names: dict[int, s
     return Panel(table, title="Recent picks", border_style="grey50")
 
 
+STRATEGY_ORDER = ("lineup", "vona", "simulate")
 STRATEGY_LABEL = {"lineup": "Lineup", "vona": "Vona", "simulate": "Simulate"}
 
 
@@ -373,23 +420,30 @@ def build_screen(
     status: Text | None = None,
     alt: dict[str, list[Recommendation]] | None = None,
     primary: str = "lineup",
+    pending: tuple[str, ...] = (),
+    stale: tuple[str, ...] = (),
 ) -> RenderableType:
-    """The full report. `status` and `alt` are what watch adds: a freshness line
-    and the rival strategies' rankings alongside the primary one."""
+    """The full report. `status`, `alt`, `pending` and `stale` are what watch
+    adds: a freshness line, the rival strategies' rankings alongside the primary
+    one, and which of those columns is still being computed or is a pick old."""
     from rich.columns import Columns
 
     my_next = my_picks[0] if my_picks else None
     following = my_picks[1] if len(my_picks) > 1 else None
     current = my_next or state.current_pick
-    others = {s: rows for s, rows in (alt or {}).items() if s != primary}
+    alt = alt or {}
+    columns = tuple(
+        s for s in STRATEGY_ORDER if s != primary and (s in alt or s in pending)
+    )
+    fresh = {s: rows for s, rows in alt.items() if s not in stale}
     parts: list[RenderableType] = [header(league, state, my_next, on_clock)]
     if status is not None:
         parts.append(status)
     parts += [Text(), verdict(recs)]
-    if others:
-        parts.append(agreement(alt or {}, primary))
+    if len(fresh) > 1:
+        parts.append(agreement(fresh, primary))
     parts += [
-        recommendations_table(recs, width, others),
+        recommendations_table(recs, width, alt, columns, stale),
         Columns(
             [
                 roster_panel(league, my_players),
@@ -403,7 +457,12 @@ def build_screen(
             "Proj season points · VOR over replacement · Floor/Ceil 10th and 90th percentile "
             "season · Wait points lost if you pass on the position · Back P(available next "
             "turn) · Cost expected points behind the best pick"
-            + (" · Vona/Simu that strategy's own rank for the same player" if others else ""),
+            + (
+                " · Vona/Simu that strategy's own rank for the same player"
+                " (… still ranking, * a pick behind)"
+                if columns
+                else ""
+            ),
             style="dim",
         ),
     ]
