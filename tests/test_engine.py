@@ -220,3 +220,27 @@ verdict2 = _ui.compare_verdict(split)
 assert "SPLIT" in verdict2.plain, "simulate ranks the scarce player above lineup/vona here"
 print(f"compare on a known split: {verdict2.plain.splitlines()[0]}")
 print("PASS: compare view reports a real disagreement rather than hiding it")
+
+# watch draws the board from results[primary], so every flag combination must
+# leave the primary strategy actually computed. Filtering the primary out of the
+# fast list shipped a KeyError on the default `fdraft watch`.
+from fantasy_draft.cli import _watch_strategies
+
+for _strategy in ("lineup", "vona", "simulate"):
+    for _objective in ("points", "win"):
+        _primary, _fast = _watch_strategies(_strategy, _objective)
+        assert _primary in _fast or _primary == "simulate", (
+            f"--strategy {_strategy} --objective {_objective} ranks by {_primary}, "
+            f"which nothing computes: fast={_fast}"
+        )
+    assert _watch_strategies(_strategy, "win") == ("simulate", [])
+print("PASS: watch ranks whichever strategy it draws the board from")
+
+# The simulate column must never pass an earlier pick's ranking off as current.
+_stale = _ui.simulate_note(picks_made=62, ranked_at=60, running_since=None)
+_running = _ui.simulate_note(picks_made=62, ranked_at=60, running_since=time.time() - 5)
+_current = _ui.simulate_note(picks_made=60, ranked_at=60, running_since=None)
+assert "2 picks behind" in _stale.plain, _stale.plain
+assert "ranking" in _running.plain and "behind" in _running.plain, _running.plain
+assert _current.plain.strip() == "· simulate current", _current.plain
+print("PASS: the simulate column reports how far behind the board it is")

@@ -262,8 +262,7 @@ def watch(
     The line under the header says when the board was last read, whether it came
     straight from Sleeper, and how current the simulate column is.
     """
-    primary = "simulate" if objective == "win" else strategy
-    fast = [s for s in ("lineup", "vona") if s != primary]
+    primary, fast = _watch_strategies(strategy, objective)
 
     with SleeperClient() as client:
         session = _session(client, username, league_id, draft_id, season, slot,
@@ -467,6 +466,20 @@ def _session(client, username, league_id, draft_id, season, slot, overrides=None
         raise typer.Exit(1) from exc
 
 
+def _watch_strategies(strategy: str, objective: str) -> tuple[str, list[str]]:
+    """Which strategy the board is ordered by, and which rank fast enough to
+    paint at once.
+
+    The primary must be one the board can be drawn from, so it is either in the
+    fast list or it is simulate, which the caller waits on. Under --objective
+    win only simulate can measure a share of the title odds, so the closed-form
+    two are not run at all.
+    """
+    if objective == "win":
+        return "simulate", []
+    return strategy, ["lineup", "vona"]
+
+
 def _rank(session, state, roster_id, strategy: str, limit: int, sims: int,
           risk: float | None, objective: str) -> list:
     """Rank one strategy against an explicit draft state.
@@ -502,6 +515,10 @@ def _watch_screen(session, results: dict, primary: str, limit: int, interval: fl
     stale = ()
     if "simulate" in results and sim["ranked_at"] != made:
         stale = ("simulate",)
+    # A failed rollout with nothing to show drops its column: the red status
+    # line carries the error, where an ellipsis would imply work still running.
+    failed_cold = sim["error"] and "simulate" not in results
+    pending = ("simulate",) if primary != "simulate" and not failed_cold else ()
     return ui.build_screen(
         session.league,
         session.state,
@@ -516,7 +533,7 @@ def _watch_screen(session, results: dict, primary: str, limit: int, interval: fl
         status=status,
         alt=results,
         primary=primary,
-        pending=("simulate",) if primary != "simulate" else (),
+        pending=pending,
         stale=stale,
     )
 
