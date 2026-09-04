@@ -182,21 +182,45 @@ to certain, not a haircut on a whole season.
 
 #### `fdraft waivers`
 
-Ranks free agents by what each would add to your actual roster, not his raw
-projection. A free agent who only ever fills your worst bench slot ranks low
-even with a good number; the ranking is the same marginal-value question the
-draft board asks, asked again against your current roster.
+Answers one question — should you sign anybody, and who do you drop for him.
+Signing and dropping are a single decision, so they are scored as a **pair**
+and ranked by what the pair is worth. Ranking them apart hides the case that
+matters: a good free agent you have no room for, and a droppable body you have
+no use for the spot.
 
 | Flag | Default | What it does |
 |---|---|---|
-| `--pos`, `-p` | all | Filter to one position. |
-| `--limit`, `-n` | 20 | How many free agents to list. |
+| `--pos`, `-p` | all | Only consider one position. |
+| `--weeks` | rest of season | How many weeks ahead to value. `--weeks 3` asks "just get me through the next three". |
+| `--limit`, `-n` | 8 | How many moves to list. |
 
-#### `fdraft drops`
+The yardstick is **rest-of-season points, seated week by week**. Your roster
+is made into a starting lineup separately for every week left, using that
+week's own projections, and the weeks are summed. Three things fall out of
+that which a season-total ranking gets wrong:
 
-The mirror image: your own roster, ranked by how little each player is
-currently contributing. The top of the list is the safest cut to make room for
-a waiver claim.
+- **Byes need no special case.** A player on bye has no stat line that week,
+  so he is simply absent from it. If four of your receivers are out in week
+  14, the week-14 lineup seats whoever is left and scores the hole honestly.
+  The command opens by naming the weeks your roster cannot fill.
+- **Bench value stops being a fudge factor.** `BENCH_FACTOR` exists in the
+  draft model because a season-long view cannot see *when* a backup plays.
+  Here a bench player earns his keep in the weeks he is actually seated.
+- **Games already played do not count.** A season projection includes weeks
+  that are over. Only the weeks ahead can still be changed by a move.
+
+An empty starter slot scores **zero** here, not replacement level — the one
+place this deliberately parts company with the draft engine. The draft engine
+floors every slot at the waiver wire because it assumes you will stream
+someone eventually; that assumption is precisely what is being decided now, so
+keeping it would score every pickup at nothing.
+
+It also separates a signing from a *date*. A player who would start for you
+week after week is an upgrade: take him now, because he will not be there
+later. A player whose value is one future week is bye cover, and the wire will
+still be offering his equivalent the week before you need him — so the
+recommendation is "wait until week 7", not a signing that burns a roster spot
+for six weeks. Only moves worth acting on today can headline.
 
 #### `fdraft alerts`
 
@@ -208,8 +232,9 @@ run for a league, since there is nothing yet to compare against.
 
 ```bash
 fdraft lineup                  # this week's start/sit changes
-fdraft waivers -p RB -n 10     # best running backs on the wire
-fdraft drops                   # safest cuts on your own roster
+fdraft waivers                 # sign anyone? drop whom?
+fdraft waivers --weeks 3       # value only the next three weeks
+fdraft waivers -p RB           # only consider running backs
 fdraft alerts                  # who moved since last time
 ```
 
@@ -522,6 +547,14 @@ Bijan Robinson,RB,318.0,3.4
   upside of picking up a breakout is not modelled. Real rosters gain more from
   waivers than this assumes, which means late-round picks are worth even less
   than the model already says.
+- **Injuries that have not happened yet.** The rest-of-season horizon behind
+  `waivers` takes every remaining week's projection at face value, so it sees
+  no reason to hold a backup as insurance. It will happily suggest dropping
+  your third running back, because in a season where nobody gets hurt that
+  spot is genuinely idle.
+- **Who else wants the same free agent.** There is no ownership or bid data
+  here, so `waivers` cannot tell you what a claim will cost in FAAB, only
+  what the player is worth to you.
 - **Correlation between players.** Two receivers on one team compete for the
   same targets; their seasons are drawn independently.
 - **Opponent roster needs.** Opponents follow ADP; they do not skip a position
@@ -538,13 +571,16 @@ of 300 ranks the board in about two seconds; below about 200 the ordering
 wobbles between seeds. The default `vona` strategy runs in closed form and is
 effectively instant.
 
-The judgement calls live in four files and are meant to be edited:
+The judgement calls live in five files and are meant to be edited:
 `valuation.py` holds bench factors, injury discounts (season-long and
 weekly) and the hindsight blend; `simulate.py` holds how far ADP spreads
 around its mean; `outcomes.py` holds the spread constants behind every floor
 and ceiling; `changes.py` holds how far a projection has to move before
-`alerts` flags it. The `outcomes.py` constants are judgement, not fitted to
-data - they are the least certain numbers in the project.
+`alerts` flags it; `waivers.py` holds how much a move has to be worth before
+it is worth making, and how few weeks a player can start in before he counts
+as a streamer rather than an upgrade. The `outcomes.py` constants are
+judgement, not fitted to data - they are the least certain numbers in the
+project.
 
 ## Data sources
 
@@ -583,10 +619,11 @@ PYTHONPATH=tests .venv/bin/python tests/test_season.py
 ```
 
 The same, for the in-season tools: weekly projections come back game-status
-discounted, dropping and re-adding a player is an exact round trip, a clear
-bench upgrade actually swaps into the lineup, waivers and drops rank a roster's
-real weak point rather than raw projections, and a snapshot flags a real swing
-while ignoring normal week-to-week noise.
+discounted, the horizon ignores weeks already played, a bye-week hole is
+scored honestly and a fill-in credited for plugging it, a one-week fill-in is
+deferred to the week it is needed while a week-in-week-out upgrade is not, an
+add and the drop paying for it are netted as one decision, and a snapshot
+flags a real swing while ignoring normal week-to-week noise.
 
 ```bash
 PYTHONPATH=tests .venv/bin/python tests/hypotheses.py

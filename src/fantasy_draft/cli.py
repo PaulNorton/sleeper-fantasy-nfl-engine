@@ -24,8 +24,14 @@ from .season import build_season_session
 from .session import build_session, load_config, save_config
 from .simulate import RolloutConfig
 from .sleeper import SleeperClient, SleeperError
-from .valuation import LineupEvaluator
-from .waivers import rank_adds, rank_drops
+from .waivers import (
+    WORTH_DOING,
+    best_moves,
+    load_horizon,
+    open_roster_spots,
+    remaining_weeks,
+    shortlist_free_agents,
+)
 
 app = typer.Typer(add_completion=False, help="Draft assistant for Sleeper leagues.")
 console = Console()
@@ -454,69 +460,99 @@ def lineup(
 
 @app.command()
 def waivers(
-    position: Optional[str] = typer.Option(None, "--pos", "-p", help="Filter by position."),
+    position: Optional[str] = typer.Option(None, "--pos", "-p", help="Only consider one position."),
     username: Optional[str] = U,
     league_id: Optional[str] = L,
     season: Optional[str] = S,
     roster_id: Optional[int] = RID,
+    weeks: Optional[int] = typer.Option(
+        None, "--weeks",
+        help="How many weeks ahead to value. Default is the rest of the season.",
+    ),
     projections: Optional[str] = OV,
     no_consensus: bool = NOFP,
-    limit: int = typer.Option(20, "--limit", "-n", help="How many free agents to list."),
+    limit: int = typer.Option(8, "--limit", "-n", help="How many moves to list."),
 ) -> None:
-    """Rank free agents by what they would add to your roster, not their raw projection."""
+    """Decide whether to sign anyone, and who to drop to make room.
+
+    Adds and drops are one decision, so they are scored as a pair, on
+    rest-of-season points seated week by week. That is what makes a bye-week
+    crunch visible: a free agent who plays the week four of your starters are
+    out is worth what he plugs, and a season-total ranking cannot see it.
+    """
     with SleeperClient() as client:
         sess = _season_session(client, username, league_id, season, roster_id,
                                projections, not no_consensus)
-        if sess.my_roster_id is None:
+        row = sess.my_roster()
+        if row is None:
             console.print("[yellow]Could not tell which team is yours — pass --roster-id.[/]")
             raise typer.Exit(1)
-        evaluator = LineupEvaluator.from_league(sess.league, sess.replacement)
-        pool = sess.free_agents()
-        if position:
-            pool = [p for p in pool if p.position == position.upper()]
-        targets = rank_adds(evaluator, sess.my_players(), pool, limit=limit)
-        table = Table("Player", "Pos", "Tm", "Proj", "Adds", "ADP", title="Free agents")
-        for t in targets:
+        current = int(client.state().get("display_week") or client.state().get("week") or 1)
+        horizon_weeks = remaining_weeks(current, weeks)
+        if not horizon_weeks:
+            console.print("[yellow]No weeks left in the season to plan for.[/]")
+            raise typer.Exit(0)
+
+        with console.status(
+            f"loading weeks {horizon_weeks[0]}–{horizon_weeks[-1]} projections…"
+        ):
+            horizon = load_horizon(client, sess.league, sess.season, horizon_weeks)
+            roster = sess.my_players()
+            pool = sess.free_agents()
+            if position:
+                pool = [p for p in pool if p.position == position.upper()]
+            pool = shortlist_free_agents(horizon, pool)
+            spare = open_roster_spots(sess.league, row)
+            moves = best_moves(sess.league, horizon, roster, pool,
+                               spare_spots=spare, limit=limit)
+
+        console.print(ui.week_outlook(sess.league, horizon, roster))
+        console.print()
+
+        # A bye-week streamer is not a move to make today, however well he
+        # scores: the wire will still be offering his equivalent the week
+        # before you need him. Only moves worth acting on now can headline.
+        act_now = [m for m in moves if not m.can_wait and m.gain >= WORTH_DOING]
+        best = act_now[0] if act_now else None
+        if best is None:
+            waiting = next((m for m in moves if m.can_wait), None)
+            console.print(
+                f"[green]Stand pat.[/] No signing clears {WORTH_DOING:.0f} points of "
+                f"rest-of-season value this week."
+            )
+            if waiting:
+                console.print(
+                    f"[dim]Diarise: {waiting.reason()} — {waiting.add.name} and others like "
+                    f"him are worth about {waiting.gain:+.1f} then.[/]"
+                )
+        else:
+            drop = f", drop {best.drop.label}" if best.drop else " (you have a spare roster spot)"
+            console.print(
+                f"[bold]Sign {best.add.label}{drop}.[/] Worth [green]{best.gain:+.1f}[/] "
+                f"points over weeks {horizon_weeks[0]}–{horizon_weeks[-1]}; he starts "
+                f"{best.starts} of the {len(horizon_weeks)} weeks left."
+            )
+        if not moves:
+            raise typer.Exit(0)
+
+        console.print()
+        table = Table("Sign", "Pos", "Tm", "Drop", "Gain", "Starts", "Where it lands",
+                      title=f"Weeks {horizon_weeks[0]}–{horizon_weeks[-1]}")
+        for m in moves:
             table.add_row(
-                t.player.label,
-                f"{t.player.position}{t.player.pos_rank}",
-                t.player.team or "FA",
-                f"{t.player.points:.0f}",
-                f"{t.added_value:+.1f}",
-                "—" if t.player.adp >= 999 else f"{t.player.adp:.0f}",
+                m.add.label if m.add else "—",
+                m.add.position if m.add else "—",
+                (m.add.team or "FA") if m.add else "—",
+                m.drop.label if m.drop else "(spare spot)",
+                f"{m.gain:+.1f}",
+                str(m.starts),
+                Text(m.reason(), style="dim" if m.can_wait else ""),
             )
         console.print(table)
-
-
-@app.command()
-def drops(
-    username: Optional[str] = U,
-    league_id: Optional[str] = L,
-    season: Optional[str] = S,
-    roster_id: Optional[int] = RID,
-    projections: Optional[str] = OV,
-    no_consensus: bool = NOFP,
-    limit: int = typer.Option(10, "--limit", "-n", help="How many roster spots to list."),
-) -> None:
-    """Rank your own roster by how little each player is contributing — safest drops first."""
-    with SleeperClient() as client:
-        sess = _season_session(client, username, league_id, season, roster_id,
-                               projections, not no_consensus)
-        if sess.my_roster_id is None:
-            console.print("[yellow]Could not tell which team is yours — pass --roster-id.[/]")
-            raise typer.Exit(1)
-        evaluator = LineupEvaluator.from_league(sess.league, sess.replacement)
-        candidates = rank_drops(evaluator, sess.my_players(), limit=limit)
-        table = Table("Player", "Pos", "Tm", "Proj", "Contribution", title="Safest drops first")
-        for c in candidates:
-            table.add_row(
-                c.player.label,
-                f"{c.player.position}{c.player.pos_rank}",
-                c.player.team or "FA",
-                f"{c.player.points:.0f}",
-                f"{c.contribution:+.1f}",
+        if spare:
+            console.print(
+                Text(f"{spare} roster spot(s) open, so these need no drop.", style="dim")
             )
-        console.print(table)
 
 
 @app.command()

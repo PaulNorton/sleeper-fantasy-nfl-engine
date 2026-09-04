@@ -245,6 +245,46 @@ def roster_panel(league: LeagueSettings, players: list[Player]) -> Panel:
     return Panel(table, title="Your roster", subtitle=subtitle, border_style="green")
 
 
+def week_outlook(league: LeagueSettings, horizon, roster: list[Player]) -> RenderableType:
+    """The weeks your roster cannot field a full lineup, and what they cost.
+
+    This is the diagnosis behind a waiver recommendation, so it prints the
+    exceptions rather than a row per week: a bye crunch or an injury hole is
+    the reason a middling free agent can be worth more than his season number
+    says, and a healthy week is not news.
+    """
+    from .waivers import horizon_value, open_slots
+
+    evaluator = _zero_floor(league)
+    points = horizon_value(evaluator, horizon, roster)
+    holes = open_slots(evaluator, horizon, roster)
+    problem = [wk for wk in horizon.weeks if holes.get(wk, 0) > 0]
+    span = f"weeks {horizon.weeks[0]}–{horizon.weeks[-1]}" if horizon.weeks else "no weeks"
+
+    if not problem:
+        return Text(f"Your roster fills every starter slot in all {span}.", style="green")
+
+    typical = sorted(points.values())[len(points) // 2] if points else 0.0
+    table = Table("Week", "Unfilled", "Starts", "vs typical week",
+                  title=f"Holes in {span}")
+    for wk in problem:
+        scored = points.get(wk, 0.0)
+        table.add_row(
+            str(wk),
+            Text(str(holes[wk]), style="red bold"),
+            f"{scored:.0f}",
+            Text(f"{scored - typical:+.0f}", style="red" if scored < typical else "dim"),
+        )
+    return table
+
+
+def _zero_floor(league: LeagueSettings):
+    """A lineup evaluator that scores an empty slot as zero, not replacement."""
+    from .valuation import LineupEvaluator
+
+    return LineupEvaluator.from_league(league, {})
+
+
 def upcoming_panel(state: DraftState, picks: list[int]) -> Panel:
     text = Text()
     for n in picks:

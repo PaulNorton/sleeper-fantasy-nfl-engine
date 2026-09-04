@@ -245,27 +245,38 @@ def load_players(
 
 
 def load_week_points(
-    client: SleeperClient, league: LeagueSettings, season: str, week: int
+    client: SleeperClient,
+    league: LeagueSettings,
+    season: str,
+    week: int,
+    status_discount=weekly_injury_multiplier,
+    ttl: float | None = None,
 ) -> list[Player]:
-    """This week's projected points, scored with the league's own settings.
+    """One week's projected points, scored with the league's own settings.
 
     Distinct from `load_players`: no ADP, no bye, no risk curve. A single
     week is not a season, and the risk model in `outcomes.py` is calibrated to
     season-long rank movement, not week-to-week swing - grafting it onto one
-    week would report a false floor and ceiling. `points` here already carries
-    `weekly_injury_multiplier`'s game-status discount, since a player ruled Out
-    for the week is close to a hard zero rather than a season-long haircut.
+    week would report a false floor and ceiling. A player on bye has no stat
+    line at all in his bye week, so he simply does not come back in the list.
+
+    `status_discount` decides how hard an injury designation is applied, and
+    which one to pass depends on how far off the week is. For the week about to
+    be played, `weekly_injury_multiplier` is right: "Out" means he does not
+    play that game. For weeks further out, pass `injury_multiplier` instead -
+    today's Questionable tag says little about week 14, and treating it as
+    though it does would write off a healthy player for the rest of the season.
     """
     scoring = league.scoring_settings
     fmt = league.scoring_format
     players: list[Player] = []
 
     for pos in league.needed_positions:
-        for row in client.projections(season, pos, week=week):
+        for row in client.projections(season, pos, week=week, ttl=ttl):
             p = _row_to_player(row, pos, scoring, fmt)
             if p is None:
                 continue
-            p.points = round(p.points * weekly_injury_multiplier(p.injury_status), 1)
+            p.points = round(p.points * status_discount(p.injury_status), 1)
             players.append(p)
 
     return _dedupe(players)

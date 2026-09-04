@@ -279,32 +279,6 @@ class LineupEvaluator:
             base = self.utility(roster)
         return self.utility(add_to_roster(roster, pos, points, bye)) - base
 
-    def contribution(self, roster: Roster, pos: str, points: float, bye: int = 0) -> float:
-        """What a specific rostered player is currently worth to you - what you
-        lose by dropping him. Symmetric with `marginal`: computed on the roster
-        with him removed, so a replaceable bench body scores near zero even
-        though his own projection is not.
-        """
-        without = remove_from_roster(roster, pos, points, bye)
-        return self.utility(roster) - self.utility(without)
-
-
-def remove_from_roster(roster: Roster, pos: str, points: float, bye: int = 0) -> Roster:
-    """Return a shallow copy with one matching player removed.
-
-    A no-op if nothing matches, so a stale or rounded `points` fails quietly
-    rather than raising - callers that need to know whether the drop landed
-    should check the returned roster themselves.
-    """
-    new = dict(roster)
-    lst = list(new.get(pos, ()))
-    try:
-        lst.remove((-points, bye))
-    except ValueError:
-        pass
-    new[pos] = lst
-    return new
-
 
 def roster_from_players(players) -> Roster:
     roster: Roster = {}

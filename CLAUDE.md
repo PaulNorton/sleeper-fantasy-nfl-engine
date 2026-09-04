@@ -38,6 +38,8 @@ changes every recommendation, so they are commented and grouped:
 - `valuation.py` - bench factors, injury discounts, the hindsight blend.
 - `simulate.py` - how far actual draft position spreads around ADP.
 - `changes.py` - how far a projection has to move before `alerts` flags it.
+- `waivers.py` - what a move has to be worth before it is worth making, and
+  how few weeks a player can start in before he is a streamer, not an upgrade.
 
 ## Constraints worth remembering
 
@@ -59,3 +61,10 @@ changes every recommendation, so they are commented and grouped:
   stability across seeds before concluding the model is wrong.
 - **Editing a projection invalidates the risk fields.** Call `attach_risk`
   after changing `points`, or the simulated season describes a different player.
+- **A player on bye has no weekly stat line at all**, so he drops out of
+  `load_week_points` for that week rather than coming back as a zero. The
+  rest-of-season model in `waivers.py` relies on this: byes need no special
+  case because an absent player simply cannot be seated.
+- **In-season value is rest-of-season value.** A season-long projection counts
+  games already played, so it is the wrong number for any decision taken after
+  week 1. Sum the remaining weeks instead.
