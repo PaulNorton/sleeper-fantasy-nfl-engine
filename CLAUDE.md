@@ -1,7 +1,9 @@
 # fantasy-draft
 
 Draft assistant for Sleeper fantasy football leagues. A CLI that reads a live
-draft from the Sleeper API and recommends the next pick.
+draft from the Sleeper API and recommends the next pick, then carries on
+in-season: setting your lineup, ranking waivers and drops, and flagging
+players whose projection moved.
 
 ## Working agreement
 
@@ -14,11 +16,14 @@ single-author repository.
 
 ```bash
 PYTHONPATH=tests .venv/bin/python tests/test_engine.py
+PYTHONPATH=tests .venv/bin/python tests/test_season.py
 ```
 
-Runs the engine against live projections and synthetic drafts. It hits the
-network (Sleeper and FantasyPros, both cached) and takes a few minutes. Every
-check must pass before committing.
+`test_engine.py` runs the draft-time engine against live projections and
+synthetic drafts. `test_season.py` covers the in-season tools - lineup,
+waivers, drops, alerts - the same way. Both hit the network (Sleeper and
+FantasyPros, both cached) and take a few minutes. Every check must pass
+before committing.
 
 ## What matters here
 
@@ -32,6 +37,7 @@ changes every recommendation, so they are commented and grouped:
   the least certain numbers in the project; they are not fitted to data.
 - `valuation.py` - bench factors, injury discounts, the hindsight blend.
 - `simulate.py` - how far actual draft position spreads around ADP.
+- `changes.py` - how far a projection has to move before `alerts` flags it.
 
 ## Constraints worth remembering
 

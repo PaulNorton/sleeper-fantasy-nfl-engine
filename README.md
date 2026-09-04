@@ -158,6 +158,61 @@ bye. No roster logic, no simulation.
 | `--pos`, `-p` | all | Filter to one position, e.g. `RB`. |
 | `--limit`, `-n` | 25 | How many players to list. |
 
+### In-season commands
+
+Once the draft is over, your roster comes from the league's live roster list
+instead of the draft board, and it moves week to week through waivers, drops
+and trades. These four commands cover that. They share `--username`,
+`--league-id`, `--season`, `--projections` and `--no-consensus` with the
+draft commands, plus `--roster-id` in place of `--slot` if your team cannot be
+detected automatically.
+
+#### `fdraft lineup`
+
+Compares the lineup Sleeper has saved to the one your week's projections say
+is best, and lists only the swaps where they disagree.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--week` | current | Which week to plan for. |
+
+A player ruled `Out` for the week scores close to zero rather than the milder
+season-long injury discount `board` uses — missing this week's game is close
+to certain, not a haircut on a whole season.
+
+#### `fdraft waivers`
+
+Ranks free agents by what each would add to your actual roster, not his raw
+projection. A free agent who only ever fills your worst bench slot ranks low
+even with a good number; the ranking is the same marginal-value question the
+draft board asks, asked again against your current roster.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--pos`, `-p` | all | Filter to one position. |
+| `--limit`, `-n` | 20 | How many free agents to list. |
+
+#### `fdraft drops`
+
+The mirror image: your own roster, ranked by how little each player is
+currently contributing. The top of the list is the safest cut to make room for
+a waiver claim.
+
+#### `fdraft alerts`
+
+Snapshots every player's season projection and, on the next run, flags anyone
+whose number moved more than the threshold in `changes.py` since the last one.
+There is no news feed behind it — an injury and a quietly lost starting job
+both show up the same way, as a projection that jumped. Silent on the first
+run for a league, since there is nothing yet to compare against.
+
+```bash
+fdraft lineup                  # this week's start/sit changes
+fdraft waivers -p RB -n 10     # best running backs on the wire
+fdraft drops                   # safest cuts on your own roster
+fdraft alerts                  # who moved since last time
+```
+
 ### `fdraft backtest`
 
 Replays a finished season to see how the engine would have drafted. Teams draft
@@ -483,17 +538,19 @@ of 300 ranks the board in about two seconds; below about 200 the ordering
 wobbles between seeds. The default `vona` strategy runs in closed form and is
 effectively instant.
 
-The judgement calls live in three files and are meant to be edited:
-`valuation.py` holds bench factors, injury discounts and the hindsight blend;
-`simulate.py` holds how far ADP spreads around its mean; `outcomes.py` holds the
-spread constants behind every floor and ceiling. Those spread constants are
-judgement, not fitted to data - they are the least certain numbers in the
-project.
+The judgement calls live in four files and are meant to be edited:
+`valuation.py` holds bench factors, injury discounts (season-long and
+weekly) and the hindsight blend; `simulate.py` holds how far ADP spreads
+around its mean; `outcomes.py` holds the spread constants behind every floor
+and ceiling; `changes.py` holds how far a projection has to move before
+`alerts` flags it. The `outcomes.py` constants are judgement, not fitted to
+data - they are the least certain numbers in the project.
 
 ## Data sources
 
-- **Sleeper** for the league, the live draft, projected stat lines and ADP. No
-  authentication needed. The draft and its picks are fetched past Sleeper's CDN
+- **Sleeper** for the league, the live draft, live rosters, projected stat
+  lines (season-long and per week) and ADP. No authentication needed. The
+  draft and its picks are fetched past Sleeper's CDN
   with a unique query parameter. Those two endpoints are served `public,
   s-maxage=..., stale-while-revalidate=300`, so a plain request in the seconds
   after a pick gets the copy from before it — the board appears to flick between
@@ -520,6 +577,16 @@ superflex, fills mandatory slots before the draft ends, rotates off a saturated
 position, treats a fallen player as likely to go soon, prices rookies wider than
 veterans, and records which strategies separate a scarce player from an
 identical one who will last.
+
+```bash
+PYTHONPATH=tests .venv/bin/python tests/test_season.py
+```
+
+The same, for the in-season tools: weekly projections come back game-status
+discounted, dropping and re-adding a player is an exact round trip, a clear
+bench upgrade actually swaps into the lineup, waivers and drops rank a roster's
+real weak point rather than raw projections, and a snapshot flags a real swing
+while ignoring normal week-to-week noise.
 
 ```bash
 PYTHONPATH=tests .venv/bin/python tests/hypotheses.py

@@ -15,11 +15,17 @@ from rich.table import Table
 from rich.text import Text
 
 from . import ui
+from .changes import find_movers, load_snapshot, save_snapshot
 from .league import LeagueSettings
+from .lineup import find_swaps
+from .projections import load_week_points
 from .recommend import recommend
+from .season import build_season_session
 from .session import build_session, load_config, save_config
 from .simulate import RolloutConfig
 from .sleeper import SleeperClient, SleeperError
+from .valuation import LineupEvaluator
+from .waivers import rank_adds, rank_drops
 
 app = typer.Typer(add_completion=False, help="Draft assistant for Sleeper leagues.")
 console = Console()
@@ -80,6 +86,8 @@ OBJ = typer.Option(
     help="'points' maximises your expected total. 'win' maximises the chance of "
          "finishing top of the league, which is where a player's upside actually pays.",
 )
+RID = typer.Option(None, "--roster-id", help="Your roster id, if it cannot be detected.")
+WK = typer.Option(None, "--week", help="Week to plan for. Default is Sleeper's current week.")
 
 
 @app.command()
@@ -399,6 +407,159 @@ def available(
 
 
 @app.command()
+def lineup(
+    username: Optional[str] = U,
+    league_id: Optional[str] = L,
+    season: Optional[str] = S,
+    roster_id: Optional[int] = RID,
+    week: Optional[int] = WK,
+    projections: Optional[str] = OV,
+    no_consensus: bool = NOFP,
+) -> None:
+    """Compare your saved lineup to the optimal one for a week."""
+    with SleeperClient() as client:
+        sess = _season_session(client, username, league_id, season, roster_id,
+                               projections, not no_consensus)
+        row = sess.my_roster()
+        if row is None:
+            console.print("[yellow]Could not tell which team is yours — pass --roster-id.[/]")
+            raise typer.Exit(1)
+        wk = week or int(client.state().get("display_week") or client.state().get("week") or 1)
+
+        rostered_ids = {str(pid) for pid in (row.get("players") or [])}
+        week_points = {p.player_id: p for p in load_week_points(client, sess.league, sess.season, wk)}
+        roster = [week_points[pid] for pid in rostered_ids if pid in week_points]
+        # Anyone the weekly feed has nothing for (a bye, an untracked backup)
+        # cannot be recommended blind, so he is seated at zero rather than left
+        # out - leaving him out would let the optimiser ignore that he holds a
+        # slot at all.
+        for pid in rostered_ids - set(week_points):
+            base = sess.players.get(pid)
+            if base is not None:
+                roster.append(replace(base, points=0.0))
+
+        swaps = find_swaps(sess.league, roster, sess.my_starter_ids())
+        if not swaps:
+            console.print(f"[green]Your week {wk} lineup already matches the optimiser.[/]")
+            raise typer.Exit(0)
+        table = Table("Start", "Pos", "Proj", "Over", "Proj", title=f"Week {wk} lineup changes")
+        for s in swaps:
+            table.add_row(
+                s.start.label, s.start.position, f"{s.start.points:.1f}",
+                s.sit.label if s.sit else "(empty slot)",
+                f"{s.sit.points:.1f}" if s.sit else "—",
+            )
+        console.print(table)
+
+
+@app.command()
+def waivers(
+    position: Optional[str] = typer.Option(None, "--pos", "-p", help="Filter by position."),
+    username: Optional[str] = U,
+    league_id: Optional[str] = L,
+    season: Optional[str] = S,
+    roster_id: Optional[int] = RID,
+    projections: Optional[str] = OV,
+    no_consensus: bool = NOFP,
+    limit: int = typer.Option(20, "--limit", "-n", help="How many free agents to list."),
+) -> None:
+    """Rank free agents by what they would add to your roster, not their raw projection."""
+    with SleeperClient() as client:
+        sess = _season_session(client, username, league_id, season, roster_id,
+                               projections, not no_consensus)
+        if sess.my_roster_id is None:
+            console.print("[yellow]Could not tell which team is yours — pass --roster-id.[/]")
+            raise typer.Exit(1)
+        evaluator = LineupEvaluator.from_league(sess.league, sess.replacement)
+        pool = sess.free_agents()
+        if position:
+            pool = [p for p in pool if p.position == position.upper()]
+        targets = rank_adds(evaluator, sess.my_players(), pool, limit=limit)
+        table = Table("Player", "Pos", "Tm", "Proj", "Adds", "ADP", title="Free agents")
+        for t in targets:
+            table.add_row(
+                t.player.label,
+                f"{t.player.position}{t.player.pos_rank}",
+                t.player.team or "FA",
+                f"{t.player.points:.0f}",
+                f"{t.added_value:+.1f}",
+                "—" if t.player.adp >= 999 else f"{t.player.adp:.0f}",
+            )
+        console.print(table)
+
+
+@app.command()
+def drops(
+    username: Optional[str] = U,
+    league_id: Optional[str] = L,
+    season: Optional[str] = S,
+    roster_id: Optional[int] = RID,
+    projections: Optional[str] = OV,
+    no_consensus: bool = NOFP,
+    limit: int = typer.Option(10, "--limit", "-n", help="How many roster spots to list."),
+) -> None:
+    """Rank your own roster by how little each player is contributing — safest drops first."""
+    with SleeperClient() as client:
+        sess = _season_session(client, username, league_id, season, roster_id,
+                               projections, not no_consensus)
+        if sess.my_roster_id is None:
+            console.print("[yellow]Could not tell which team is yours — pass --roster-id.[/]")
+            raise typer.Exit(1)
+        evaluator = LineupEvaluator.from_league(sess.league, sess.replacement)
+        candidates = rank_drops(evaluator, sess.my_players(), limit=limit)
+        table = Table("Player", "Pos", "Tm", "Proj", "Contribution", title="Safest drops first")
+        for c in candidates:
+            table.add_row(
+                c.player.label,
+                f"{c.player.position}{c.player.pos_rank}",
+                c.player.team or "FA",
+                f"{c.player.points:.0f}",
+                f"{c.contribution:+.1f}",
+            )
+        console.print(table)
+
+
+@app.command()
+def alerts(
+    username: Optional[str] = U,
+    league_id: Optional[str] = L,
+    season: Optional[str] = S,
+    projections: Optional[str] = OV,
+    no_consensus: bool = NOFP,
+) -> None:
+    """Flag players whose season projection moved a lot since the last run.
+
+    There is no news feed behind this - it notices an injury or a depth-chart
+    change the same way, indirectly, as a projection that jumped. Silent on
+    the first run for a league, since there is nothing yet to compare against.
+    """
+    with SleeperClient() as client:
+        sess = _season_session(client, username, league_id, season, None,
+                               projections, not no_consensus)
+        previous = load_snapshot(client.cache_dir, sess.league.league_id, sess.season)
+        players = list(sess.players.values())
+        movers = find_movers(players, previous)
+        save_snapshot(client.cache_dir, sess.league.league_id, sess.season, players)
+        if not previous:
+            console.print("[dim]First run for this league — nothing to compare to yet.[/]")
+            raise typer.Exit(0)
+        if not movers:
+            console.print("[green]No projection has moved enough to flag.[/]")
+            raise typer.Exit(0)
+        table = Table("Player", "Pos", "Tm", "Was", "Now", "Change", title="Projection movers")
+        for m in movers:
+            table.add_row(
+                m.player.label,
+                f"{m.player.position}{m.player.pos_rank}",
+                m.player.team or "FA",
+                f"{m.previous:.0f}",
+                f"{m.current:.0f}",
+                f"{m.delta:+.0f}",
+            )
+        console.print(table)
+
+
+@app.command()
 def backtest(
     username: Optional[str] = U,
     league_id: Optional[str] = L,
@@ -461,6 +622,25 @@ def _session(client, username, league_id, draft_id, season, slot, overrides=None
     opts["consensus"] = consensus
     try:
         return build_session(client, **opts)
+    except SleeperError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
+
+
+def _season_session(client, username, league_id, season, roster_id, overrides=None,
+                    consensus=True):
+    cfg = load_config()
+    try:
+        return build_season_session(
+            client,
+            username=username or cfg.get("username"),
+            user_id=cfg.get("user_id"),
+            league_id=league_id or cfg.get("league_id"),
+            season=season or cfg.get("season"),
+            roster_id=roster_id,
+            overrides=overrides or cfg.get("overrides"),
+            consensus=consensus,
+        )
     except SleeperError as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
