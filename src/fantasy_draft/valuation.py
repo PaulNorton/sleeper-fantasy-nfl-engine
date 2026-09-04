@@ -64,6 +64,29 @@ def injury_multiplier(status: str | None) -> float:
     return INJURY_DISCOUNT.get(status, 0.95)
 
 
+# Discount for a single week's projection, distinct from the season-long
+# `INJURY_DISCOUNT` above. That table softens a full season for a player who is
+# banged up now but expected back; scoring one week is closer to a coin flip
+# than a haircut, since "Out" means he does not play that game at all. Not
+# fitted to data - a designation-to-probability guess, grouped here with the
+# other one so the two are easy to tell apart and easy to argue with.
+WEEKLY_STATUS_DISCOUNT = {
+    "IR": 0.0,
+    "PUP": 0.0,
+    "NA": 0.0,
+    "Sus": 0.0,
+    "Out": 0.02,
+    "Doubtful": 0.25,
+    "Questionable": 0.85,
+}
+
+
+def weekly_injury_multiplier(status: str | None) -> float:
+    if not status:
+        return 1.0
+    return WEEKLY_STATUS_DISCOUNT.get(status, 0.9)
+
+
 # position -> [(-points, bye week)], sorted so the best player comes first.
 Roster = dict[str, list[tuple[float, int]]]
 
@@ -255,6 +278,32 @@ class LineupEvaluator:
         if base is None:
             base = self.utility(roster)
         return self.utility(add_to_roster(roster, pos, points, bye)) - base
+
+    def contribution(self, roster: Roster, pos: str, points: float, bye: int = 0) -> float:
+        """What a specific rostered player is currently worth to you - what you
+        lose by dropping him. Symmetric with `marginal`: computed on the roster
+        with him removed, so a replaceable bench body scores near zero even
+        though his own projection is not.
+        """
+        without = remove_from_roster(roster, pos, points, bye)
+        return self.utility(roster) - self.utility(without)
+
+
+def remove_from_roster(roster: Roster, pos: str, points: float, bye: int = 0) -> Roster:
+    """Return a shallow copy with one matching player removed.
+
+    A no-op if nothing matches, so a stale or rounded `points` fails quietly
+    rather than raising - callers that need to know whether the drop landed
+    should check the returned roster themselves.
+    """
+    new = dict(roster)
+    lst = list(new.get(pos, ()))
+    try:
+        lst.remove((-points, bye))
+    except ValueError:
+        pass
+    new[pos] = lst
+    return new
 
 
 def roster_from_players(players) -> Roster:

@@ -120,13 +120,26 @@ class SleeperClient:
     def traded_picks(self, draft_id: str) -> list[dict]:
         return self._get(f"{V1}/draft/{draft_id}/traded_picks", ttl=60) or []
 
-    def projections(self, season: str, position: str, ttl: float = 21600) -> list[dict]:
+    def projections(
+        self, season: str, position: str, week: int | None = None, ttl: float | None = None
+    ) -> list[dict]:
+        """Season-long projections, or one week's when `week` is given.
+
+        A week's projection moves through the week as practice reports land, so
+        it gets a much shorter default TTL than the season number, which barely
+        moves once the season starts.
+        """
         params = [
             ("season_type", "regular"),
             ("position[]", position),
             ("order_by", "pts_ppr"),
         ]
-        return self._get(f"{V2}/projections/nfl/{season}", params=params, ttl=ttl) or []
+        url = f"{V2}/projections/nfl/{season}"
+        if week is not None:
+            url += f"/{week}"
+        if ttl is None:
+            ttl = 3600 if week is not None else 21600
+        return self._get(url, params=params, ttl=ttl) or []
 
     def schedule(self, season: str, ttl: float = 604800) -> list[dict]:
         """Every regular season game. Used to work out bye weeks."""

@@ -10,7 +10,7 @@ from .league import LeagueSettings
 from .sleeper import SleeperClient
 from .fantasypros import Consensus
 from .outcomes import base_spread, expert_spread, percentile, total_spread
-from .valuation import injury_multiplier
+from .valuation import injury_multiplier, weekly_injury_multiplier
 
 # Stat keys that are metadata, not scoreable production.
 NON_SCORING_PREFIXES = ("adp_", "pts_")
@@ -172,10 +172,60 @@ def bye_weeks(schedule: list[dict]) -> dict[str, int]:
     return byes
 
 
+def _row_to_player(
+    row: dict, pos: str, scoring: dict[str, float], fmt: str,
+    byes: dict[str, int] | None = None, adp_key: str | None = None,
+) -> Player | None:
+    """Turn one Sleeper projection row into a scored Player, or None if empty.
+
+    Shared by the season loader and the weekly one below - the row shape is
+    identical, only the ADP and bye lookups differ, and neither applies to a
+    single week.
+    """
+    info = row.get("player") or {}
+    stats = {k: float(v) for k, v in (row.get("stats") or {}).items() if v is not None}
+    if not stats:
+        return None
+    points = score_stats(stats, scoring)
+    if points <= 0:
+        points = _fallback_points(stats, fmt)
+    if points <= 0:
+        return None
+    position = (info.get("position") or pos or "").upper()
+    position = POSITION_ALIAS.get(position, position)
+    name = " ".join(x for x in (info.get("first_name"), info.get("last_name")) if x).strip()
+    team = row.get("team") or info.get("team")
+    adp = MISSING_ADP
+    if adp_key is not None:
+        adp = float(stats.get(adp_key) or stats.get(f"adp_{fmt}") or MISSING_ADP)
+    return Player(
+        player_id=str(row.get("player_id")),
+        name=name or str(row.get("player_id")),
+        position=position,
+        team=team,
+        points=round(points, 1),
+        adp=adp,
+        bye=(byes or {}).get(str(team or "")),
+        injury_status=info.get("injury_status"),
+        years_exp=info.get("years_exp"),
+        stats=stats,
+    )
+
+
+def _dedupe(players: list[Player]) -> list[Player]:
+    """A player can appear under more than one position query; keep the best."""
+    unique: dict[str, Player] = {}
+    for p in players:
+        prior = unique.get(p.player_id)
+        if prior is None or p.points > prior.points:
+            unique[p.player_id] = p
+    return list(unique.values())
+
+
 def load_players(
     client: SleeperClient, league: LeagueSettings, season: str
 ) -> list[Player]:
-    """Fetch projections for every position the league rosters and score them."""
+    """Fetch season-long projections for every position the league rosters."""
     scoring = league.scoring_settings
     adp_key = league.adp_key
     fmt = league.scoring_format
@@ -184,47 +234,41 @@ def load_players(
 
     for pos in league.needed_positions:
         for row in client.projections(season, pos):
-            info = row.get("player") or {}
-            stats = {k: float(v) for k, v in (row.get("stats") or {}).items() if v is not None}
-            if not stats:
-                continue
-            points = score_stats(stats, scoring)
-            if points <= 0:
-                points = _fallback_points(stats, fmt)
-            if points <= 0:
-                continue
-            position = (info.get("position") or pos or "").upper()
-            position = POSITION_ALIAS.get(position, position)
-            name = " ".join(
-                x for x in (info.get("first_name"), info.get("last_name")) if x
-            ).strip()
-            adp = float(stats.get(adp_key) or stats.get(f"adp_{fmt}") or MISSING_ADP)
-            players.append(
-                Player(
-                    player_id=str(row.get("player_id")),
-                    name=name or str(row.get("player_id")),
-                    position=position,
-                    team=row.get("team") or info.get("team"),
-                    points=round(points, 1),
-                    adp=adp,
-                    bye=byes.get(str(row.get("team") or info.get("team") or "")),
-                    injury_status=info.get("injury_status"),
-                    years_exp=info.get("years_exp"),
-                    stats=stats,
-                )
-            )
+            p = _row_to_player(row, pos, scoring, fmt, byes=byes, adp_key=adp_key)
+            if p is not None:
+                players.append(p)
 
-    # Deduplicate: a player can appear under more than one position query.
-    unique: dict[str, Player] = {}
-    for p in players:
-        prior = unique.get(p.player_id)
-        if prior is None or p.points > prior.points:
-            unique[p.player_id] = p
-    result = list(unique.values())
-
+    result = _dedupe(players)
     _assign_ranks(result)
     attach_risk(result)
     return result
+
+
+def load_week_points(
+    client: SleeperClient, league: LeagueSettings, season: str, week: int
+) -> list[Player]:
+    """This week's projected points, scored with the league's own settings.
+
+    Distinct from `load_players`: no ADP, no bye, no risk curve. A single
+    week is not a season, and the risk model in `outcomes.py` is calibrated to
+    season-long rank movement, not week-to-week swing - grafting it onto one
+    week would report a false floor and ceiling. `points` here already carries
+    `weekly_injury_multiplier`'s game-status discount, since a player ruled Out
+    for the week is close to a hard zero rather than a season-long haircut.
+    """
+    scoring = league.scoring_settings
+    fmt = league.scoring_format
+    players: list[Player] = []
+
+    for pos in league.needed_positions:
+        for row in client.projections(season, pos, week=week):
+            p = _row_to_player(row, pos, scoring, fmt)
+            if p is None:
+                continue
+            p.points = round(p.points * weekly_injury_multiplier(p.injury_status), 1)
+            players.append(p)
+
+    return _dedupe(players)
 
 
 def _assign_ranks(players: list[Player]) -> None:
