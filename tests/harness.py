@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
 from fantasy_draft.draft import DraftState
@@ -15,7 +16,17 @@ from fantasy_draft.projections import (
     load_players,
     replacement_levels,
 )
+from fantasy_draft.session import load_config
 from fantasy_draft.sleeper import SleeperClient
+
+
+def league_id() -> str:
+    """A real league to read scoring settings from. Any public league will do."""
+    lid = os.environ.get("FDRAFT_LEAGUE_ID") or load_config().get("league_id")
+    if not lid:
+        sys.exit("set FDRAFT_LEAGUE_ID, or run `fdraft setup` to save a league")
+    return str(lid)
+
 
 STANDARD = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "K", "DEF"] + ["BN"] * 6
 SUPERFLEX = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "SUPER_FLEX"] + ["BN"] * 7

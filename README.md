@@ -65,9 +65,9 @@ Give a username, a league id, or both. With only a league id it saves the
 league without resolving which team is yours, so add `--slot`.
 
 ```bash
-fdraft setup --username YOUR_SLEEPER_NAME                     # lists your leagues
-fdraft setup --username YOUR_SLEEPER_NAME --league-id YOUR_LEAGUE_ID   # picks one
-fdraft setup --league-id YOUR_LEAGUE_ID --slot 7                # no account needed
+fdraft setup --username YOUR_SLEEPER_NAME                             # lists your leagues
+fdraft setup --username YOUR_SLEEPER_NAME --league-id YOUR_LEAGUE_ID  # picks one
+fdraft setup --league-id YOUR_LEAGUE_ID --slot 7                      # no account needed
 ```
 
 ### `fdraft leagues`

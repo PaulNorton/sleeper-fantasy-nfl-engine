@@ -3,6 +3,9 @@ lineup strategy, each as a paired backtest over 2024 and 2025.
 
 Run: PYTHONPATH=tests .venv/bin/python tests/hypotheses.py
 
+Reads scoring settings from a real league: $FDRAFT_LEAGUE_ID, or the league
+saved in fdraft.json.
+
 H1 - Robust RB: prioritise running backs in the first few rounds beyond their
      raw marginal value, on the wisdom that touch-share concentration and
      in-season attrition make a bell-cow scarcer than his projection implies.
@@ -151,8 +154,8 @@ import statistics
 from fantasy_draft.backtest import prepare, run
 from fantasy_draft.league import LeagueSettings
 from fantasy_draft.sleeper import SleeperClient
+from harness import league_id
 
-LEAGUE_ID = "YOUR_LEAGUE_ID"
 SEASONS = ("2025", "2024")
 STRATEGIES = (
     "greedy", "reach_averse", "ceiling_bench",
@@ -164,7 +167,7 @@ STRATEGIES = (
 
 def main() -> None:
     with SleeperClient() as client:
-        league = LeagueSettings.from_api(client.league(LEAGUE_ID))
+        league = LeagueSettings.from_api(client.league(league_id()))
         pooled: dict[str, list[float]] = {s: [] for s in STRATEGIES}
         for season in SEASONS:
             players, replacement, actual = prepare(client, league, season)

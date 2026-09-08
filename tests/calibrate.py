@@ -4,6 +4,9 @@ Run this to reproduce the numbers commented in outcomes.POSITION_SPREAD and
 projections.RELIABILITY, or to re-fit them once another season is in the books:
 
     PYTHONPATH=tests .venv/bin/python tests/calibrate.py
+
+Reads scoring settings from a real league: $FDRAFT_LEAGUE_ID, or the league
+saved in fdraft.json.
 """
 
 import math
@@ -15,6 +18,7 @@ from fantasy_draft.league import LeagueSettings
 from fantasy_draft.outcomes import POSITION_SPREAD, RANK_OFFSET
 from fantasy_draft.projections import SHRINKAGE, load_players
 from fantasy_draft.sleeper import SleeperClient
+from harness import league_id
 
 SEASONS = ("2024", "2025")
 MAX_ADP = 250  # deep projections are noise and would distort the fit
@@ -48,7 +52,7 @@ def measure(league: LeagueSettings, players, actual):
 
 def main() -> None:
     with SleeperClient() as client:
-        league = LeagueSettings.from_api(client.league("YOUR_LEAGUE_ID"))
+        league = LeagueSettings.from_api(client.league(league_id()))
         seasons = {}
         for season in SEASONS:
             players = load_players(client, league, season)
@@ -96,7 +100,7 @@ def sweep() -> None:
     from fantasy_draft.backtest import prepare, run
 
     with SleeperClient() as client:
-        league = LeagueSettings.from_api(client.league("YOUR_LEAGUE_ID"))
+        league = LeagueSettings.from_api(client.league(league_id()))
         data = {s: prepare(client, league, s) for s in SEASONS}
 
     def points() -> list[float]:
