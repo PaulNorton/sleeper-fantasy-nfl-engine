@@ -1,4 +1,4 @@
-# fantasy-draft
+# sleeper-fantasy-nfl-engine
 
 Draft assistant for Sleeper fantasy football leagues. A CLI that reads a live
 draft from the Sleeper API and recommends the next pick, then carries on

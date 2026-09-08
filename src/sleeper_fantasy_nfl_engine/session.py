@@ -22,7 +22,7 @@ from .projections import (
 )
 from .sleeper import SleeperClient, SleeperError
 
-CONFIG_PATH = Path("fdraft.json")
+CONFIG_PATH = Path("sleeper-fantasy-nfl-engine.json")
 
 
 def load_config(path: Path = CONFIG_PATH) -> dict:
@@ -148,7 +148,7 @@ def build_session(
         league_id = league_id or draft.get("league_id")
     else:
         if not league_id:
-            raise SleeperError("need a league id or a draft id (run `fdraft setup`)")
+            raise SleeperError("need a league id or a draft id (run `sleeper-fantasy-nfl-engine setup`)")
         draft = pick_draft(client, league_id)
 
     league_data = client.league(league_id) if league_id else None

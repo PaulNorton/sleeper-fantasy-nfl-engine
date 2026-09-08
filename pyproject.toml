@@ -1,5 +1,5 @@
 [project]
-name = "fantasy-draft"
+name = "sleeper-fantasy-nfl-engine"
 version = "0.1.0"
 description = "Live draft assistant for Sleeper fantasy football leagues"
 requires-python = ">=3.11"
@@ -10,11 +10,11 @@ dependencies = [
 ]
 
 [project.scripts]
-fdraft = "fantasy_draft.cli:app"
+sleeper-fantasy-nfl-engine = "sleeper_fantasy_nfl_engine.cli:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/fantasy_draft"]
+packages = ["src/sleeper_fantasy_nfl_engine"]

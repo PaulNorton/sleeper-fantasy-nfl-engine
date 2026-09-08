@@ -5,19 +5,19 @@ projections.RELIABILITY, or to re-fit them once another season is in the books:
 
     PYTHONPATH=tests .venv/bin/python tests/calibrate.py
 
-Reads scoring settings from a real league: $FDRAFT_LEAGUE_ID, or the league
-saved in fdraft.json.
+Reads scoring settings from a real league: $SLEEPER_FANTASY_NFL_ENGINE_LEAGUE_ID, or the league
+saved in sleeper-fantasy-nfl-engine.json.
 """
 
 import math
 import statistics
 import sys
 
-from fantasy_draft.backtest import load_actuals
-from fantasy_draft.league import LeagueSettings
-from fantasy_draft.outcomes import POSITION_SPREAD, RANK_OFFSET
-from fantasy_draft.projections import SHRINKAGE, load_players
-from fantasy_draft.sleeper import SleeperClient
+from sleeper_fantasy_nfl_engine.backtest import load_actuals
+from sleeper_fantasy_nfl_engine.league import LeagueSettings
+from sleeper_fantasy_nfl_engine.outcomes import POSITION_SPREAD, RANK_OFFSET
+from sleeper_fantasy_nfl_engine.projections import SHRINKAGE, load_players
+from sleeper_fantasy_nfl_engine.sleeper import SleeperClient
 from harness import league_id
 
 SEASONS = ("2024", "2025")
@@ -96,8 +96,8 @@ def sweep() -> None:
     import math
     import statistics
 
-    from fantasy_draft import projections, valuation
-    from fantasy_draft.backtest import prepare, run
+    from sleeper_fantasy_nfl_engine import projections, valuation
+    from sleeper_fantasy_nfl_engine.backtest import prepare, run
 
     with SleeperClient() as client:
         league = LeagueSettings.from_api(client.league(league_id()))

@@ -18,7 +18,7 @@ import httpx
 V1 = "https://api.sleeper.app/v1"
 V2 = "https://api.sleeper.com"
 
-DEFAULT_CACHE = Path.home() / ".cache" / "fantasy-draft"
+DEFAULT_CACHE = Path.home() / ".cache" / "sleeper-fantasy-nfl-engine"
 
 
 class SleeperError(RuntimeError):
@@ -30,7 +30,7 @@ class SleeperClient:
         self.cache_dir = cache_dir or DEFAULT_CACHE
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._client = httpx.Client(
-            timeout=timeout, headers={"User-Agent": "fantasy-draft/0.1"}
+            timeout=timeout, headers={"User-Agent": "sleeper-fantasy-nfl-engine/0.1"}
         )
         # Freshness of the last network response, for the watch screen to show.
         self.last_fetch_at: float = 0.0

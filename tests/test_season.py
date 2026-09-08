@@ -9,12 +9,12 @@ import tempfile
 from dataclasses import replace
 from pathlib import Path
 
-from fantasy_draft.changes import find_movers, load_snapshot, save_snapshot
-from fantasy_draft.lineup import find_swaps
-from fantasy_draft.projections import Player, load_week_points
-from fantasy_draft.sleeper import SleeperClient
-from fantasy_draft.valuation import LineupEvaluator
-from fantasy_draft.waivers import (
+from sleeper_fantasy_nfl_engine.changes import find_movers, load_snapshot, save_snapshot
+from sleeper_fantasy_nfl_engine.lineup import find_swaps
+from sleeper_fantasy_nfl_engine.projections import Player, load_week_points
+from sleeper_fantasy_nfl_engine.sleeper import SleeperClient
+from sleeper_fantasy_nfl_engine.valuation import LineupEvaluator
+from sleeper_fantasy_nfl_engine.waivers import (
     Horizon,
     best_moves,
     horizon_value,

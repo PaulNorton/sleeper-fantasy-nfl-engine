@@ -5,10 +5,10 @@ from __future__ import annotations
 import os
 import sys
 
-from fantasy_draft.draft import DraftState
-from fantasy_draft.league import LeagueSettings
-from fantasy_draft.fantasypros import load_consensus
-from fantasy_draft.projections import (
+from sleeper_fantasy_nfl_engine.draft import DraftState
+from sleeper_fantasy_nfl_engine.league import LeagueSettings
+from sleeper_fantasy_nfl_engine.fantasypros import load_consensus
+from sleeper_fantasy_nfl_engine.projections import (
     apply_consensus,
     apply_reliability,
     apply_vorp,
@@ -16,15 +16,15 @@ from fantasy_draft.projections import (
     load_players,
     replacement_levels,
 )
-from fantasy_draft.session import load_config
-from fantasy_draft.sleeper import SleeperClient
+from sleeper_fantasy_nfl_engine.session import load_config
+from sleeper_fantasy_nfl_engine.sleeper import SleeperClient
 
 
 def league_id() -> str:
     """A real league to read scoring settings from. Any public league will do."""
-    lid = os.environ.get("FDRAFT_LEAGUE_ID") or load_config().get("league_id")
+    lid = os.environ.get("SLEEPER_FANTASY_NFL_ENGINE_LEAGUE_ID") or load_config().get("league_id")
     if not lid:
-        sys.exit("set FDRAFT_LEAGUE_ID, or run `fdraft setup` to save a league")
+        sys.exit("set SLEEPER_FANTASY_NFL_ENGINE_LEAGUE_ID, or run `sleeper-fantasy-nfl-engine setup` to save a league")
     return str(lid)
 
 

@@ -2,4 +2,4 @@
 .venv/
 __pycache__/
 *.egg-info/
-fdraft.json
+sleeper-fantasy-nfl-engine.json

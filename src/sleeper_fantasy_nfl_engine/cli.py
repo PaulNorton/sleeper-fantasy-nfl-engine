@@ -173,7 +173,7 @@ def leagues(username: Optional[str] = U, season: Optional[str] = S) -> None:
     cfg = load_config()
     username = username or cfg.get("username")
     if not username:
-        raise typer.BadParameter("pass --username or run `fdraft setup` first")
+        raise typer.BadParameter("pass --username or run `sleeper-fantasy-nfl-engine setup` first")
     with SleeperClient() as client:
         user = client.user(username)
         if not user:

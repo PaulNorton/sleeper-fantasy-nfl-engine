@@ -2,9 +2,9 @@
 
 import time
 
-from fantasy_draft.projections import attach_risk
-from fantasy_draft.recommend import recommend
-from fantasy_draft.simulate import RolloutConfig, availability
+from sleeper_fantasy_nfl_engine.projections import attach_risk
+from sleeper_fantasy_nfl_engine.recommend import recommend
+from sleeper_fantasy_nfl_engine.simulate import RolloutConfig, availability
 from harness import SUPERFLEX, load, make_league, make_state, pick_row
 
 league = make_league()
@@ -142,7 +142,7 @@ import io
 
 from rich.console import Console
 
-from fantasy_draft.ui import build_screen
+from sleeper_fantasy_nfl_engine.ui import build_screen
 
 buf = Console(file=io.StringIO(), width=200)
 buf.print(build_screen(league, state6, soon, [], [25, 45, 52], players,
@@ -196,7 +196,7 @@ print("PASS: the rollout separates them; the closed-form strategies do not, as d
 # 10 - the compare view: builds cleanly on agreement, and reports a real split
 # rather than papering over one. Reuses state9's forced ADP-20-vs-55 pair,
 # where strategies are known to disagree (check 9, above).
-from fantasy_draft import ui as _ui
+from sleeper_fantasy_nfl_engine import ui as _ui
 
 state10 = make_state()
 agree = {
@@ -223,8 +223,8 @@ print("PASS: compare view reports a real disagreement rather than hiding it")
 
 # watch draws the board from results[primary], so every flag combination must
 # leave the primary strategy actually computed. Filtering the primary out of the
-# fast list shipped a KeyError on the default `fdraft watch`.
-from fantasy_draft.cli import _watch_strategies
+# fast list shipped a KeyError on the default `sleeper-fantasy-nfl-engine watch`.
+from sleeper_fantasy_nfl_engine.cli import _watch_strategies
 
 for _strategy in ("lineup", "vona", "simulate"):
     for _objective in ("points", "win"):

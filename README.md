@@ -1,4 +1,4 @@
-# fantasy-draft
+# sleeper-fantasy-nfl-engine
 
 A draft assistant for Sleeper leagues. It reads your league and live draft from
 the Sleeper API and tells you which player to take next.
@@ -13,18 +13,18 @@ player left is often a quarterback you do not need.
 
 ```bash
 uv venv && uv pip install -e .
-.venv/bin/fdraft setup --username YOUR_SLEEPER_NAME
+.venv/bin/sleeper-fantasy-nfl-engine setup --username YOUR_SLEEPER_NAME
 ```
 
 Use your Sleeper **username handle**, not the email you log in with — the public
 API does not accept email addresses.
 
-`setup` saves your league to `fdraft.json`, so later commands need no flags. If
+`setup` saves your league to `sleeper-fantasy-nfl-engine.json`, so later commands need no flags. If
 you are in several leagues it lists them and asks you to pass `--league-id`.
 You can also set up from a league id alone, taken from your league URL:
 
 ```bash
-fdraft setup --league-id YOUR_LEAGUE_ID --slot 7
+sleeper-fantasy-nfl-engine setup --league-id YOUR_LEAGUE_ID --slot 7
 ```
 
 Every command takes `--league-id` to work against your other league without
@@ -32,7 +32,7 @@ changing the saved default.
 
 ## Commands
 
-Every command reads `fdraft.json` for defaults, so after `setup` the flags are
+Every command reads `sleeper-fantasy-nfl-engine.json` for defaults, so after `setup` the flags are
 optional. Any flag overrides the saved value for that one run.
 
 ### Shared flags
@@ -50,9 +50,9 @@ These appear on `board`, `watch`, `roster` and `available`.
 `roster` and `available` also take `--projections` and `--no-consensus`, below,
 so they read the same data the recommendations do.
 
-### `fdraft setup`
+### `sleeper-fantasy-nfl-engine setup`
 
-Saves your league to `fdraft.json` so other commands need no flags.
+Saves your league to `sleeper-fantasy-nfl-engine.json` so other commands need no flags.
 
 | Flag | Default | What it does |
 |---|---|---|
@@ -65,17 +65,17 @@ Give a username, a league id, or both. With only a league id it saves the
 league without resolving which team is yours, so add `--slot`.
 
 ```bash
-fdraft setup --username YOUR_SLEEPER_NAME                             # lists your leagues
-fdraft setup --username YOUR_SLEEPER_NAME --league-id YOUR_LEAGUE_ID  # picks one
-fdraft setup --league-id YOUR_LEAGUE_ID --slot 7                      # no account needed
+sleeper-fantasy-nfl-engine setup --username YOUR_SLEEPER_NAME                             # lists your leagues
+sleeper-fantasy-nfl-engine setup --username YOUR_SLEEPER_NAME --league-id YOUR_LEAGUE_ID  # picks one
+sleeper-fantasy-nfl-engine setup --league-id YOUR_LEAGUE_ID --slot 7                      # no account needed
 ```
 
-### `fdraft leagues`
+### `sleeper-fantasy-nfl-engine leagues`
 
 Lists your leagues for a season with their ids, team counts and status. Takes
 `--username` and `--season` only.
 
-### `fdraft board`
+### `sleeper-fantasy-nfl-engine board`
 
 Ranks the board for your next pick and exits. The main command.
 
@@ -89,7 +89,7 @@ Ranks the board for your next pick and exits. The main command.
 | `--projections` | — | CSV of your own projections and/or ADP, overlaid on everything else. |
 | `--no-consensus` | off | Skip FantasyPros. Falls back to Sleeper projections alone, and loses bye weeks and the expert-disagreement half of the risk model. |
 
-### `fdraft watch`
+### `sleeper-fantasy-nfl-engine watch`
 
 The same board, refreshed as the draft happens. Takes every `board` flag plus:
 
@@ -126,7 +126,7 @@ it picks up a randomised order at kickoff.
 If `simulate` lags more than a pick behind, drop `--sims`; it affects that
 strategy only, and the rest of the board is unaffected by the wait.
 
-### `fdraft compare`
+### `sleeper-fantasy-nfl-engine compare`
 
 Ranks the board under all three strategies (`lineup`, `vona`, `simulate`) side
 by side, for a second opinion at the moment of your actual pick.
@@ -144,11 +144,11 @@ worth a second look before you lock in `lineup`'s pick.
 
 Takes the same `--projections` and `--no-consensus` flags as `board`.
 
-### `fdraft roster`
+### `sleeper-fantasy-nfl-engine roster`
 
 Your drafted players seated into starter slots, and which slots are still open.
 
-### `fdraft available`
+### `sleeper-fantasy-nfl-engine available`
 
 The best players still on the board by raw value, with floor, ceiling, ADP and
 bye. No roster logic, no simulation.
@@ -167,7 +167,7 @@ and trades. These four commands cover that. They share `--username`,
 draft commands, plus `--roster-id` in place of `--slot` if your team cannot be
 detected automatically.
 
-#### `fdraft lineup`
+#### `sleeper-fantasy-nfl-engine lineup`
 
 Compares the lineup Sleeper has saved to the one your week's projections say
 is best, and lists only the swaps where they disagree.
@@ -180,7 +180,7 @@ A player ruled `Out` for the week scores close to zero rather than the milder
 season-long injury discount `board` uses — missing this week's game is close
 to certain, not a haircut on a whole season.
 
-#### `fdraft waivers`
+#### `sleeper-fantasy-nfl-engine waivers`
 
 Answers one question — should you sign anybody, and who do you drop for him.
 Signing and dropping are a single decision, so they are scored as a **pair**
@@ -222,7 +222,7 @@ still be offering his equivalent the week before you need him — so the
 recommendation is "wait until week 7", not a signing that burns a roster spot
 for six weeks. Only moves worth acting on today can headline.
 
-#### `fdraft alerts`
+#### `sleeper-fantasy-nfl-engine alerts`
 
 Snapshots every player's season projection and, on the next run, flags anyone
 whose number moved more than the threshold in `changes.py` since the last one.
@@ -231,14 +231,14 @@ both show up the same way, as a projection that jumped. Silent on the first
 run for a league, since there is nothing yet to compare against.
 
 ```bash
-fdraft lineup                  # this week's start/sit changes
-fdraft waivers                 # sign anyone? drop whom?
-fdraft waivers --weeks 3       # value only the next three weeks
-fdraft waivers -p RB           # only consider running backs
-fdraft alerts                  # who moved since last time
+sleeper-fantasy-nfl-engine lineup             # this week's start/sit changes
+sleeper-fantasy-nfl-engine waivers            # sign anyone? drop whom?
+sleeper-fantasy-nfl-engine waivers --weeks 3  # value only the next three weeks
+sleeper-fantasy-nfl-engine waivers -p RB      # only consider running backs
+sleeper-fantasy-nfl-engine alerts             # who moved since last time
 ```
 
-### `fdraft backtest`
+### `sleeper-fantasy-nfl-engine backtest`
 
 Replays a finished season to see how the engine would have drafted. Teams draft
 knowing only that season's preseason projections and ADP; rosters are then
@@ -258,12 +258,12 @@ Scoring rules come from your saved league, so a backtest measures the engine in
 *your* format. It needs `--league-id` if you have not run `setup`.
 
 ```bash
-fdraft watch                          # follow the draft live
-fdraft board --objective win -n 20    # rank by title odds
-fdraft available -p RB -n 30          # who is left at running back
-fdraft board --league-id 1397…        # your other league
-fdraft compare                        # do the strategies agree on your pick?
-fdraft backtest --season 2025         # how would it have drafted last year
+sleeper-fantasy-nfl-engine watch                                   # follow the draft live
+sleeper-fantasy-nfl-engine board --objective win -n 20             # rank by title odds
+sleeper-fantasy-nfl-engine available -p RB -n 30                   # who is left at running back
+sleeper-fantasy-nfl-engine board --league-id YOUR_OTHER_LEAGUE_ID  # your other league
+sleeper-fantasy-nfl-engine compare                                 # do the strategies agree on your pick?
+sleeper-fantasy-nfl-engine backtest --season 2025                  # how would it have drafted last year
 ```
 
 ## How a pick is scored
@@ -389,7 +389,7 @@ a real effect, not a large one.
 
 ## What the backtest found
 
-`fdraft backtest` replays a finished season: draft on preseason projections
+`sleeper-fantasy-nfl-engine backtest` replays a finished season: draft on preseason projections
 only, score the roster on what actually happened. Two seasons, ten draft slots,
 six repetitions, every strategy facing identical drafts so the comparison is
 paired.
@@ -529,7 +529,7 @@ Projections drive everything, and Sleeper's are only one opinion. Overlay your
 own:
 
 ```bash
-fdraft board --projections my_ranks.csv
+sleeper-fantasy-nfl-engine board --projections my_ranks.csv
 ```
 
 The CSV needs a name column and any of `points`, `adp`. Rows are matched on

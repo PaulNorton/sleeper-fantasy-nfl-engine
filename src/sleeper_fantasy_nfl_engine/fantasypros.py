@@ -23,7 +23,7 @@ from pathlib import Path
 import httpx
 
 BASE = "https://www.fantasypros.com/nfl/rankings"
-USER_AGENT = "fantasy-draft/0.1 (personal Sleeper draft assistant)"
+USER_AGENT = "sleeper-fantasy-nfl-engine/0.1 (personal Sleeper draft assistant)"
 CRAWL_DELAY = 5.0
 
 # Cheatsheet slug per league format.

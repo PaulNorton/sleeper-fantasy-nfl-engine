@@ -80,7 +80,7 @@ def build_season_session(
     consensus: bool = True,
 ) -> SeasonSession:
     if not league_id:
-        raise SleeperError("need a league id (run `fdraft setup`)")
+        raise SleeperError("need a league id (run `sleeper-fantasy-nfl-engine setup`)")
     uid = resolve_user_id(client, username, user_id)
     league_data = client.league(league_id)
     if not league_data:

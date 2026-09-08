@@ -3,8 +3,8 @@ lineup strategy, each as a paired backtest over 2024 and 2025.
 
 Run: PYTHONPATH=tests .venv/bin/python tests/hypotheses.py
 
-Reads scoring settings from a real league: $FDRAFT_LEAGUE_ID, or the league
-saved in fdraft.json.
+Reads scoring settings from a real league: $SLEEPER_FANTASY_NFL_ENGINE_LEAGUE_ID, or the league
+saved in sleeper-fantasy-nfl-engine.json.
 
 H1 - Robust RB: prioritise running backs in the first few rounds beyond their
      raw marginal value, on the wisdom that touch-share concentration and
@@ -151,9 +151,9 @@ H12 - Leave a starter slot empty and stream it. You do not have to fill every
 import math
 import statistics
 
-from fantasy_draft.backtest import prepare, run
-from fantasy_draft.league import LeagueSettings
-from fantasy_draft.sleeper import SleeperClient
+from sleeper_fantasy_nfl_engine.backtest import prepare, run
+from sleeper_fantasy_nfl_engine.league import LeagueSettings
+from sleeper_fantasy_nfl_engine.sleeper import SleeperClient
 from harness import league_id
 
 SEASONS = ("2025", "2024")
