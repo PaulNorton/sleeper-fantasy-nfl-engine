@@ -55,6 +55,26 @@ SHRINKAGE = {
 }
 DEFAULT_SHRINKAGE = 0.85
 
+# How much of the ordering comes from the experts rather than from Sleeper.
+#
+# Judgement calls, all three, and the reason they are not one number is that
+# the three rankings answer different questions.
+#
+#   DRAFT  0.5  A season cheatsheet and a season projection are the same
+#               claim about the same thing. Split it evenly.
+#   WEEKLY 0.5  Same argument for one week, and the experts see the practice
+#               reports and the game script that Sleeper's number does not.
+#   ROS    0.35 A rest-of-season rank is *cumulative*: a player who misses
+#               three games ranks below an equal player who does not. The
+#               week-by-week seating in `waivers.py` already scores those
+#               missed weeks, by leaving him out of them. Weighting the ROS
+#               order as heavily as the weekly one would dock him twice for
+#               the same absence, so it gets less.
+DRAFT_CONSENSUS_WEIGHT = 0.5
+WEEKLY_CONSENSUS_WEIGHT = 0.5
+ROS_CONSENSUS_WEIGHT = 0.35
+
+
 # Positions Sleeper reports that no lineup slot accepts under their own name.
 POSITION_ALIAS = {"FB": "RB", "HB": "RB", "OLB": "LB", "ILB": "LB", "CB": "DB", "S": "DB", "DE": "DL", "DT": "DL"}
 
@@ -79,6 +99,7 @@ class Player:
     ecr: float | None = None
     rank_std: float = 0.0
     bye: int | None = None
+    opponent: str | None = None               # this week's fixture, weekly rankings only
     shrunk: float | None = None               # projection pulled toward replacement
     spread: float = 0.0                       # log-scale of rank movement
     curve: list[float] = field(default_factory=list, repr=False)
@@ -251,6 +272,8 @@ def load_week_points(
     week: int,
     status_discount=weekly_injury_multiplier,
     ttl: float | None = None,
+    consensus: list[Consensus] | None = None,
+    consensus_weight: float = WEEKLY_CONSENSUS_WEIGHT,
 ) -> list[Player]:
     """One week's projected points, scored with the league's own settings.
 
@@ -259,6 +282,18 @@ def load_week_points(
     season-long rank movement, not week-to-week swing - grafting it onto one
     week would report a false floor and ceiling. A player on bye has no stat
     line at all in his bye week, so he simply does not come back in the list.
+
+    `consensus`, when given, is blended into the ordering exactly the way the
+    draft board blends the cheatsheet: each position is re-seated on its own
+    points curve by a mix of Sleeper's order and the experts'. Sleeper
+    publishes one projection; the weekly consensus is 70-odd analysts who have
+    read the practice report, and taking only the first is what made this
+    week's lineup a repeat of Sleeper's own start/sit page.
+
+    The blend runs *before* `status_discount`, and the order is not incidental.
+    Re-seating moves points between players, so discounting first would hand a
+    player who is ruled out his near-zero and then pass it to whoever the blend
+    happens to seat last.
 
     `status_discount` decides how hard an injury designation is applied, and
     which one to pass depends on how far off the week is. For the week about to
@@ -274,12 +309,15 @@ def load_week_points(
     for pos in league.needed_positions:
         for row in client.projections(season, pos, week=week, ttl=ttl):
             p = _row_to_player(row, pos, scoring, fmt)
-            if p is None:
-                continue
-            p.points = round(p.points * status_discount(p.injury_status), 1)
-            players.append(p)
+            if p is not None:
+                players.append(p)
 
-    return _dedupe(players)
+    result = _dedupe(players)
+    if consensus:
+        blend_ranks(result, consensus, consensus_weight)
+    for p in result:
+        p.points = round(p.points * status_discount(p.injury_status), 1)
+    return result
 
 
 def _assign_ranks(players: list[Player]) -> None:
@@ -465,15 +503,19 @@ def _density(rows: list[Consensus]) -> dict[str, float]:
     return {pos: max(0.04, n / total) for pos, n in counts.items()}
 
 
-def apply_consensus(
-    players: list[Player], rows: list[Consensus], weight: float = 0.5
+def blend_ranks(
+    players: list[Player], rows: list[Consensus], weight: float = DRAFT_CONSENSUS_WEIGHT
 ) -> int:
-    """Blend expert consensus into the projections, then recompute risk.
+    """Re-seat each position on its own points curve by a blended ranking.
 
     Value is blended as a *ranking*, not as points: the league-scored points
     curve is kept and players are re-seated on it according to a blend of
     Sleeper's projection order and the expert consensus order. That adopts the
     crowd's ordering while keeping a realistic distribution of points.
+
+    Positions are blended one at a time, so a ranking that covers only some of
+    them - or that orders positions against each other differently from this
+    league - changes nothing outside the positions it lists.
     """
     index = {(_norm(p.name), p.position): p for p in players}
     matched = 0
@@ -485,6 +527,7 @@ def apply_consensus(
         target.ecr = r.ecr
         target.rank_std = r.rank_std
         target.bye = target.bye or r.bye
+        target.opponent = r.opponent or target.opponent
         target.positional_rank_std = r.rank_std * density.get(r.position, 0.2)
         matched += 1
 
@@ -504,8 +547,17 @@ def apply_consensus(
                 return _s[p.player_id]
             return weight * e_rank + (1 - weight) * _s[p.player_id]
 
-        for player, points in zip(sorted(group, key=blended), curve):
+        for rank, (player, points) in enumerate(zip(sorted(group, key=blended), curve), start=1):
             player.points = points
+            player.pos_rank = rank
 
+    return matched
+
+
+def apply_consensus(
+    players: list[Player], rows: list[Consensus], weight: float = DRAFT_CONSENSUS_WEIGHT
+) -> int:
+    """Blend expert consensus into season projections, then recompute risk."""
+    matched = blend_ranks(players, rows, weight)
     attach_risk(players)
     return matched

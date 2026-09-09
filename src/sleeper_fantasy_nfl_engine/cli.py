@@ -18,6 +18,7 @@ from . import ui
 from .changes import find_movers, load_snapshot, save_snapshot
 from .league import LeagueSettings
 from .lineup import find_swaps
+from .fantasypros import load_weekly_consensus
 from .projections import load_week_points
 from .recommend import recommend
 from .season import build_season_session
@@ -431,9 +432,23 @@ def lineup(
             console.print("[yellow]Could not tell which team is yours — pass --roster-id.[/]")
             raise typer.Exit(1)
         wk = week or int(client.state().get("display_week") or client.state().get("week") or 1)
+        current = int(client.state().get("display_week") or client.state().get("week") or 1)
+
+        # The experts rank the upcoming week only. Asked for a later one, this
+        # falls back to Sleeper alone rather than dressing last week's opinion
+        # up as this week's.
+        rows: list = []
+        if not no_consensus and wk == current:
+            try:
+                rows = load_weekly_consensus(sess.league.scoring_format, client.cache_dir)
+            except Exception:
+                pass
 
         rostered_ids = {str(pid) for pid in (row.get("players") or [])}
-        week_points = {p.player_id: p for p in load_week_points(client, sess.league, sess.season, wk)}
+        week_points = {
+            p.player_id: p
+            for p in load_week_points(client, sess.league, sess.season, wk, consensus=rows)
+        }
         roster = [week_points[pid] for pid in rostered_ids if pid in week_points]
         # Anyone the weekly feed has nothing for (a bye, an untracked backup)
         # cannot be recommended blind, so he is seated at zero rather than left
@@ -444,18 +459,33 @@ def lineup(
             if base is not None:
                 roster.append(replace(base, points=0.0))
 
+        if not rows:
+            console.print(
+                "[yellow]No expert consensus for this week — Sleeper projections only.[/]"
+            )
         swaps = find_swaps(sess.league, roster, sess.my_starter_ids())
         if not swaps:
             console.print(f"[green]Your week {wk} lineup already matches the optimiser.[/]")
             raise typer.Exit(0)
-        table = Table("Start", "Pos", "Proj", "Over", "Proj", title=f"Week {wk} lineup changes")
+
+        table = Table("Start", "Proj", "Rank", "Over", "Proj", "Rank", "Edge", "Call",
+                      title=f"Week {wk} lineup changes")
         for s in swaps:
             table.add_row(
-                s.start.label, s.start.position, f"{s.start.points:.1f}",
-                s.sit.label if s.sit else "(empty slot)",
+                ui.player_cell(s.start), f"{s.start.points:.1f}", ui.rank_cell(s.start),
+                ui.player_cell(s.sit),
                 f"{s.sit.points:.1f}" if s.sit else "—",
+                ui.rank_cell(s.sit) if s.sit else "—",
+                f"{s.edge:+.1f}",
+                Text("coin flip", style="dim") if s.close_call
+                else Text("clear", style="green"),
             )
         console.print(table)
+        if any(s.close_call for s in swaps):
+            console.print(
+                "[dim]A coin flip is a swap the experts do not separate — the gap "
+                "between them is smaller than how much they disagree.[/]"
+            )
 
 
 @app.command()
@@ -496,7 +526,8 @@ def waivers(
         with console.status(
             f"loading weeks {horizon_weeks[0]}–{horizon_weeks[-1]} projections…"
         ):
-            horizon = load_horizon(client, sess.league, sess.season, horizon_weeks)
+            horizon = load_horizon(client, sess.league, sess.season, horizon_weeks,
+                                   consensus=not no_consensus)
             roster = sess.my_players()
             pool = sess.free_agents()
             if position:

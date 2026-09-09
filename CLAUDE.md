@@ -40,13 +40,29 @@ changes every recommendation, so they are commented and grouped:
 - `changes.py` - how far a projection has to move before `alerts` flags it.
 - `waivers.py` - what a move has to be worth before it is worth making, and
   how few weeks a player can start in before he is a streamer, not an upgrade.
+- `projections.py` - the three consensus weights (draft, weekly, rest of
+  season). How much of every ordering comes from the experts rather than
+  from Sleeper.
 
 ## Constraints worth remembering
 
-- **FantasyPros:** only the cheatsheet pages are read. Their robots.txt
-  disallows `/ajax/`, `/api/`, `/json/`, and the full projections tables load
-  from `/ajax/`. Do not scrape those. Identify the client honestly, honour the
-  5-second crawl delay, cache responses.
+- **FantasyPros:** only the ranking pages under `/nfl/rankings/` are read -
+  the season cheatsheet, the weekly rankings, and the rest-of-season list.
+  Their robots.txt disallows `/ajax/`, `/api/`, `/json/`, and the full
+  projections tables load from `/ajax/`. Do not scrape those. Identify the
+  client honestly, honour the 5-second crawl delay, cache responses.
+- **`qb.php` serves an empty ranking to a plain HTTP client** - literally
+  `var ecrData = []` - and fills its table in from a script. Weekly
+  quarterbacks come off `superflex.php` filtered to QB, which renders the same
+  ranking server-side. Check for an empty list, not a non-200, when a
+  FantasyPros page seems to have lost its data.
+- **FantasyPros ranks the upcoming week only.** `?week=N` for a later week
+  returns an empty list rather than an error. Weeks past the next one use the
+  rest-of-season ranking instead.
+- **Blend the consensus before applying an injury discount.** Blending
+  re-seats a position's points curve, so it moves points between players.
+  Discount first and a player ruled out hands his near-zero to whoever the
+  blend happens to seat last.
 - **Sleeper's `/league/{id}/drafts` returns abbreviated draft objects** with no
   `slot_to_roster_id`. Always re-fetch the chosen draft from `/draft/{id}`.
 - **Sleeper serves `/draft/{id}` and `/draft/{id}/picks` through Cloudflare**

@@ -3,6 +3,11 @@
 Reuses the same greedy slot-filler `draft.fill_roster` uses for the draft
 board, pointed at this week's projections (`projections.load_week_points`)
 instead of season totals.
+
+Those projections carry the week's expert consensus, not Sleeper's number
+alone - see `load_week_points`. That is also what makes `Swap.close_call`
+possible: the experts publish how much they disagree, so a swap can say
+whether it is a real edge or a coin flip, which a single projection cannot.
 """
 
 from __future__ import annotations
@@ -19,6 +24,36 @@ class Swap:
     position: str
     start: Player            # who the optimal lineup starts
     sit: Player | None       # who your saved lineup has instead, if anyone
+
+    @property
+    def edge(self) -> float:
+        """Projected points the change is worth this week."""
+        return self.start.points - (self.sit.points if self.sit else 0.0)
+
+    @property
+    def close_call(self) -> bool:
+        """True when the experts do not actually separate these two.
+
+        The consensus publishes a standard deviation across its analysts, so
+        two players whose rankings differ by less than their combined
+        disagreement are a coin flip, however the projections happen to order
+        them. Saying so is the point: it tells you which changes are worth
+        making and which are noise you can leave alone.
+
+        Both sides need an expert ranking for the comparison to mean anything,
+        and both need to be the same position. Ranks are only comparable
+        within the ranking they came from, and a swap can pair two positions
+        when `find_swaps` runs out of like-for-like - a quarterback against a
+        defence has two ranks that happen to be numbers, not two ranks that
+        can be subtracted. Unranked, mismatched, or an empty slot is not a
+        close call; it is a change to make.
+        """
+        if self.sit is None or self.start.ecr is None or self.sit.ecr is None:
+            return False
+        if self.start.position != self.sit.position:
+            return False
+        spread = (self.start.rank_std ** 2 + self.sit.rank_std ** 2) ** 0.5
+        return abs(self.start.ecr - self.sit.ecr) < spread
 
 
 def optimal_lineup(

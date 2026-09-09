@@ -10,8 +10,13 @@ from dataclasses import replace
 from pathlib import Path
 
 from sleeper_fantasy_nfl_engine.changes import find_movers, load_snapshot, save_snapshot
-from sleeper_fantasy_nfl_engine.lineup import find_swaps
-from sleeper_fantasy_nfl_engine.projections import Player, load_week_points
+from sleeper_fantasy_nfl_engine.fantasypros import (
+    Consensus,
+    load_ros_consensus,
+    load_weekly_consensus,
+)
+from sleeper_fantasy_nfl_engine.lineup import Swap, find_swaps
+from sleeper_fantasy_nfl_engine.projections import Player, blend_ranks, load_week_points
 from sleeper_fantasy_nfl_engine.sleeper import SleeperClient
 from sleeper_fantasy_nfl_engine.valuation import LineupEvaluator
 from sleeper_fantasy_nfl_engine.waivers import (
@@ -43,6 +48,76 @@ out_players = [p for p in week1 if p.injury_status == "Out"]
 if out_players:
     assert out_players[0].points <= 3.0, "a player ruled Out should score near zero for the week"
 print(f"PASS: loaded {len(week1)} week-1 projections, game-status discounted")
+
+# 1b - the weekly and rest-of-season consensus both load, and between them
+# cover every position the app values. A missing position here means a
+# FantasyPros page changed shape, and the lineup silently falls back to
+# Sleeper alone for it.
+with SleeperClient() as client:
+    weekly = load_weekly_consensus(league.scoring_format, client.cache_dir)
+    ros = load_ros_consensus(league.scoring_format, client.cache_dir)
+for label, rows in (("weekly", weekly), ("ros", ros)):
+    got = {r.position for r in rows}
+    assert {"QB", "RB", "WR", "TE", "K", "DEF"} <= got, (label, sorted(got))
+    assert any(r.rank_std > 0 for r in rows), f"{label} publishes no expert disagreement"
+assert any(r.opponent for r in weekly), "the weekly ranking should carry a fixture"
+print(f"PASS: consensus loaded — {len(weekly)} weekly, {len(ros)} rest-of-season")
+
+# 1c - the consensus actually reaches a weekly board, and reaches it before the
+# injury discount rather than after. Ordering the other way round would move a
+# player's discounted points onto somebody healthy.
+with SleeperClient() as client:
+    plain = {p.player_id: p for p in load_week_points(client, league, "2025", 1)}
+    blended = {
+        p.player_id: p
+        for p in load_week_points(client, league, "2025", 1, consensus=weekly)
+    }
+assert set(plain) == set(blended), "blending must not add or drop players"
+assert any(r.ecr is not None for r in blended.values()), "no player matched the consensus"
+assert any(
+    abs(blended[pid].points - plain[pid].points) > 0.05 for pid in plain
+), "the consensus changed no ordering at all"
+for pid, p in blended.items():
+    if p.injury_status in ("Out", "IR"):
+        assert p.points <= 3.0, (p.name, p.injury_status, p.points)
+print("PASS: weekly consensus is blended in, and the injury discount is applied after it")
+
+# 1d - blend_ranks re-seats a position on its own points curve: same points,
+# different owners, and a position the ranking says nothing about is untouched.
+board = [mk("a", "WR", 30.0), mk("b", "WR", 20.0), mk("c", "WR", 10.0),
+         mk("lone_k", "K", 8.0)]
+
+
+def rank_row(name, pos, ecr, std=0.0):
+    return Consensus(name=name, position=pos, team="XX", ecr=ecr, rank_std=std,
+                     rank_min=ecr, rank_max=ecr, tier=1, bye=None)
+
+
+# The experts invert Sleeper's order, and at weight 1.0 they win outright.
+blend_ranks(board, [rank_row("c", "WR", 1), rank_row("b", "WR", 2),
+                    rank_row("a", "WR", 3)], weight=1.0)
+seated = {p.name: p.points for p in board}
+assert seated == {"c": 30.0, "b": 20.0, "a": 10.0, "lone_k": 8.0}, seated
+assert next(p for p in board if p.name == "c").pos_rank == 1
+assert next(p for p in board if p.name == "lone_k").points == 8.0
+print("PASS: blend_ranks re-seats one position's curve and leaves the others alone")
+
+# 1e - a swap the experts do not separate is reported as a coin flip, and one
+# they do is not.
+close = Swap("WR", replace(mk("x", "WR", 12.0), ecr=10.0, rank_std=4.0),
+             replace(mk("y", "WR", 11.5), ecr=12.0, rank_std=4.0))
+clear = Swap("WR", replace(mk("x", "WR", 18.0), ecr=4.0, rank_std=1.0),
+             replace(mk("y", "WR", 9.0), ecr=40.0, rank_std=2.0))
+assert close.close_call and not clear.close_call
+assert abs(clear.edge - 9.0) < 1e-6, clear.edge
+# An empty slot is a change to make, never a coin flip, however wide the spread.
+assert not Swap("WR", replace(mk("x", "WR", 5.0), ecr=90.0, rank_std=30.0), None).close_call
+# Nor are two ranks from different rankings comparable just because both are
+# small numbers - find_swaps pairs a QB with a defence when nothing else is left.
+crossed = Swap("QB", replace(mk("qb", "QB", 18.0), ecr=10.0, rank_std=4.0),
+               replace(mk("def", "DEF", 7.0), ecr=11.0, rank_std=4.0))
+assert not crossed.close_call
+print("PASS: a start/sit call inside the experts' own disagreement is flagged as a coin flip")
 
 # 2 - the horizon only covers the weeks still to be played.
 assert remaining_weeks(9)[0] == 9 and remaining_weeks(9)[-1] == 17

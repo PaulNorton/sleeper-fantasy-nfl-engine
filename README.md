@@ -176,9 +176,25 @@ is best, and lists only the swaps where they disagree.
 |---|---|---|
 | `--week` | current | Which week to plan for. |
 
+The ranking is Sleeper's weekly projection blended 50/50 with FantasyPros'
+weekly expert consensus, the same way the draft board blends the cheatsheet:
+as a *ranking*, so each position is re-seated on its own points curve. Sleeper
+publishes one projection; the consensus is 70-odd analysts who have read the
+practice report. Pass `--no-consensus` to rank on Sleeper alone.
+
+FantasyPros publishes weekly rankings for the upcoming week only, so
+`--week` set to a later one falls back to Sleeper and says so, rather than
+passing last week's opinion off as this week's.
+
+Each row carries the fixture, the blended positional rank, and how far apart
+the experts are about it (`WR14 ±3`). The **Call** column reads `coin flip`
+when the gap between the two players is smaller than that disagreement —
+a swap that is not worth making, however the projections happen to order them.
+
 A player ruled `Out` for the week scores close to zero rather than the milder
 season-long injury discount `board` uses — missing this week's game is close
-to certain, not a haircut on a whole season.
+to certain, not a haircut on a whole season. The discount is applied *after*
+the consensus blend, since re-seating moves points between players.
 
 #### `sleeper-fantasy-nfl-engine waivers`
 
@@ -214,6 +230,14 @@ place this deliberately parts company with the draft engine. The draft engine
 floors every slot at the waiver wire because it assumes you will stream
 someone eventually; that assumption is precisely what is being decided now, so
 keeping it would score every pickup at nothing.
+
+Every week in the horizon carries expert consensus, not Sleeper alone. The
+imminent week gets the weekly ranking at the same 50/50 weight `lineup` uses.
+The weeks after it get the **rest-of-season** ranking at 0.35, because
+FantasyPros ranks only the next week ahead. The lower weight is deliberate: a
+rest-of-season rank is cumulative, so a player who misses three games already
+ranks below an equal player who does not, and the week-by-week seating scores
+those missed weeks a second time by leaving him out of them.
 
 It also separates a signing from a *date*. A player who would start for you
 week after week is an upgrade: take him now, because he will not be there

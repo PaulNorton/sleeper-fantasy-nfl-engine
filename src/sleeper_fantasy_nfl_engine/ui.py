@@ -278,6 +278,28 @@ def week_outlook(league: LeagueSettings, horizon, roster: list[Player]) -> Rende
     return table
 
 
+def rank_cell(player: Player) -> str:
+    """Positional rank, and how much the experts disagree about it.
+
+    "WR14 ±3" reads as: he is fourteenth among receivers on the blended
+    ordering, and the analysts are about three ranks apart about him. The
+    spread is dropped for a player they have not ranked, since there is no
+    disagreement to report - not zero disagreement.
+    """
+    spread = f" ±{player.rank_std:.0f}" if player.ecr is not None and player.rank_std >= 0.5 else ""
+    return f"{player.position}{player.pos_rank}{spread}"
+
+
+def player_cell(player: Player | None, empty: str = "(empty slot)") -> Text:
+    """A player's name over his fixture, so the fixture costs no column."""
+    if player is None:
+        return Text(empty, style="dim")
+    cell = Text(player.label)
+    if player.opponent:
+        cell.append(f"\n{player.opponent}", style="dim")
+    return cell
+
+
 def _zero_floor(league: LeagueSettings):
     """A lineup evaluator that scores an empty slot as zero, not replacement."""
     from .valuation import LineupEvaluator

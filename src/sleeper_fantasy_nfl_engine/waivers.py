@@ -32,6 +32,11 @@ Weekly projections are used unshrunk. `projections.SHRINKAGE` was fitted on
 season-long projections against season-long results, and there is no
 equivalent measurement for a single week; applying it here would be an
 unvalidated transform dressed up as a correction.
+
+Expert consensus is blended in, though, because that is a second opinion
+rather than a transform. FantasyPros only publishes weekly rankings for the
+next week, so the weeks after it borrow the rest-of-season ranking instead,
+at a lower weight - see `load_horizon`.
 """
 
 from __future__ import annotations
@@ -39,8 +44,16 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
+from .fantasypros import load_ros_consensus, load_weekly_consensus
 from .league import BENCH_SLOTS, LeagueSettings
-from .projections import Player, injury_multiplier, load_week_points, weekly_injury_multiplier
+from .projections import (
+    ROS_CONSENSUS_WEIGHT,
+    WEEKLY_CONSENSUS_WEIGHT,
+    Player,
+    injury_multiplier,
+    load_week_points,
+    weekly_injury_multiplier,
+)
 from .sleeper import SleeperClient
 from .valuation import LineupEvaluator
 
@@ -133,14 +146,31 @@ def load_horizon(
     season: str,
     weeks: list[int],
     workers: int = 6,
+    consensus: bool = True,
 ) -> Horizon:
-    """Fetch every remaining week's projections.
+    """Fetch every remaining week's projections, expert consensus included.
 
     Fetched in parallel because this is 6 positions per week and the weeks do
     not depend on each other. Each (week, position) is a distinct cache entry,
-    so the threads never write the same file.
+    so the threads never write the same file. The two FantasyPros rankings are
+    fetched once, up front and in series, because they share a crawl delay.
     """
     imminent = weeks[0] if weeks else 0
+
+    weekly_rows: list = []
+    ros_rows: list = []
+    if consensus:
+        # A failed or blocked ranking must not take the whole waiver run with
+        # it; without it the horizon is Sleeper-only, which is what it used to
+        # be in every week.
+        try:
+            weekly_rows = load_weekly_consensus(league.scoring_format, client.cache_dir)
+        except Exception:
+            pass
+        try:
+            ros_rows = load_ros_consensus(league.scoring_format, client.cache_dir)
+        except Exception:
+            pass
 
     def one(week: int) -> tuple[int, dict[str, float]]:
         # Today's injury designation is a fact about this week's game and a
@@ -148,11 +178,18 @@ def load_horizon(
         # weekly discount. TTL follows the same logic: a projection for the
         # week being played moves with every practice report, one for week 14
         # does not.
+        #
+        # The consensus splits on the same line. FantasyPros ranks the next
+        # week and no further, so only the imminent week gets the weekly
+        # ranking; the rest get the rest-of-season one, which is a durable
+        # view of a player rather than a view of any particular fixture.
         near = week == imminent
         players = load_week_points(
             client, league, season, week,
             status_discount=weekly_injury_multiplier if near else injury_multiplier,
             ttl=3600 if near else 86400,
+            consensus=weekly_rows if near else ros_rows,
+            consensus_weight=WEEKLY_CONSENSUS_WEIGHT if near else ROS_CONSENSUS_WEIGHT,
         )
         return week, {p.player_id: p.points for p in players}
 
