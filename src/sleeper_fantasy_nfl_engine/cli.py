@@ -431,8 +431,8 @@ def lineup(
         if row is None:
             console.print("[yellow]Could not tell which team is yours — pass --roster-id.[/]")
             raise typer.Exit(1)
-        wk = week or int(client.state().get("display_week") or client.state().get("week") or 1)
-        current = int(client.state().get("display_week") or client.state().get("week") or 1)
+        current = _planning_week(client)
+        wk = week or current
 
         # The experts rank the upcoming week only. Asked for a later one, this
         # falls back to Sleeper alone rather than dressing last week's opinion
@@ -517,7 +517,7 @@ def waivers(
         if row is None:
             console.print("[yellow]Could not tell which team is yours — pass --roster-id.[/]")
             raise typer.Exit(1)
-        current = int(client.state().get("display_week") or client.state().get("week") or 1)
+        current = _planning_week(client)
         horizon_weeks = remaining_weeks(current, weeks)
         if not horizon_weeks:
             console.print("[yellow]No weeks left in the season to plan for.[/]")
@@ -692,6 +692,21 @@ def _session(client, username, league_id, draft_id, season, slot, overrides=None
     except SleeperError as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
+
+
+def _planning_week(client: SleeperClient) -> int:
+    """The next week you can still change.
+
+    Sleeper reports two of these. `display_week` is the week the app is
+    *showing*, and it stays on the week just played until the next one kicks
+    off - on the Monday of week 2 it still says 1. That week's lineups are
+    locked and its points are banked, so planning against it values games that
+    are already over. `week` is the week football is moving into, which is the
+    only one a lineup or a waiver claim can still affect, so it leads here and
+    `display_week` is a fallback for the off-season.
+    """
+    state = client.state()
+    return int(state.get("week") or state.get("display_week") or 1)
 
 
 def _season_session(client, username, league_id, season, roster_id, overrides=None,
