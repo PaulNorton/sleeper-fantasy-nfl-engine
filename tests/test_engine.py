@@ -160,8 +160,18 @@ print("PASS: rotates off a saturated position")
 # Runs last because it edits projections in place.
 wrs = sorted([p for p in players if p.position == "WR"], key=lambda p: -p.points)
 scarce, lasts = wrs[12], wrs[13]
-scarce.points, scarce.adp, scarce.shrunk = 300.0, 20.0, None
-lasts.points, lasts.adp, lasts.shrunk = 300.0, 55.0, None
+# ADP has to be the only difference between these two, and `points` is not the
+# number the engine decides on - `value` is, and it discounts for an injury
+# designation. These are live players, so whoever lands in these two slots
+# carries whatever tag he has today; leaving one in makes the pair unequal in
+# value and the check measures the discount instead of the ADP. The bye goes
+# the same way: a clash with the rest of the roster is priced per player, so an
+# uneven pair of byes is a second difference the check never meant to introduce.
+# backtest.py clears the tag for the same reason.
+for p in (scarce, lasts):
+    p.points, p.shrunk, p.injury_status = 300.0, None, None
+    p.bye = scarce.bye
+scarce.adp, lasts.adp = 20.0, 55.0
 attach_risk(players)  # projections changed, so ranks and spreads must be rebuilt
 state9 = make_state(
     picks=[

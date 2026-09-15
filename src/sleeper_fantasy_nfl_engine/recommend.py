@@ -219,9 +219,12 @@ def _direct_scores(
     `vona` subtracts what you could still expect from that position at your next
     pick if you passed on him now. That expectation is per player, not per
     position: it blends his own chance of surviving with the best of whatever
-    else would be left. Two receivers with identical projections therefore score
-    differently if one goes in round 2 and the other in round 5, which is the
-    whole point of the adjustment.
+    else would be left. Two players at the same position therefore score
+    differently when what sits behind them differs, which is the whole point of
+    the adjustment. Two who are each other's fallback are the exception: each
+    one's alternative is the other, so the subtraction lands in the same place
+    for both and their ADP never separates them. Only the rollout does that,
+    and it is the one case where it is worth its noise.
 
     Both answer the same question the draft rollout does, in closed form, so
     they carry none of its noise. Over 60 backtested drafts the two are
