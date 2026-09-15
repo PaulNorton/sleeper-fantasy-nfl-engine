@@ -1,6 +1,7 @@
 """Offline checks on the pick engine. Run: PYTHONPATH=tests python tests/test_engine.py"""
 
 import time
+from dataclasses import fields, replace
 
 from sleeper_fantasy_nfl_engine.projections import attach_risk
 from sleeper_fantasy_nfl_engine.recommend import recommend
@@ -158,20 +159,35 @@ print("PASS: rotates off a saturated position")
 
 # 9 - identical players, different ADP: who does each strategy take?
 # Runs last because it edits projections in place.
+# ADP has to be the only difference between the two, so the second is built as
+# a copy of the first rather than levelled field by field. Two real players are
+# never equal to begin with: they are loaded from live projections, so whoever
+# lands in these slots brings today's injury tag, his own bye, his own years of
+# experience. Levelling those one at a time only holds until the model prices
+# something else per player - which is how this check broke once already, on a
+# live Out tag that cut one side's value by 12% and opened a 34-point gap that
+# had nothing to do with ADP. Copying makes the pair equal by construction, and
+# the assertion below fails loudly if anything reintroduces a difference.
 wrs = sorted([p for p in players if p.position == "WR"], key=lambda p: -p.points)
-scarce, lasts = wrs[12], wrs[13]
-# ADP has to be the only difference between these two, and `points` is not the
-# number the engine decides on - `value` is, and it discounts for an injury
-# designation. These are live players, so whoever lands in these two slots
-# carries whatever tag he has today; leaving one in makes the pair unequal in
-# value and the check measures the discount instead of the ADP. The bye goes
-# the same way: a clash with the rest of the roster is priced per player, so an
-# uneven pair of byes is a second difference the check never meant to introduce.
-# backtest.py clears the tag for the same reason.
-for p in (scarce, lasts):
-    p.points, p.shrunk, p.injury_status = 300.0, None, None
-    p.bye = scarce.bye
-scarce.adp, lasts.adp = 20.0, 55.0
+scarce = wrs[12]
+scarce.points, scarce.shrunk, scarce.adp = 300.0, None, 20.0
+lasts = replace(
+    scarce,
+    player_id=f"{scarce.player_id}-twin",
+    name=f"{scarce.name} (twin)",
+    adp=55.0,
+)
+DELIBERATE = {"player_id", "name", "adp"}
+divergent = [
+    f.name for f in fields(scarce)
+    if f.name not in DELIBERATE
+    and getattr(scarce, f.name) != getattr(lasts, f.name)
+]
+assert not divergent, (
+    f"the pair must differ in ADP alone, but also differs in {divergent} - "
+    "carry the new field over in the copy, or the check measures it instead of ADP"
+)
+players[players.index(wrs[13])] = lasts  # the twin takes the slot, not a 31st WR
 attach_risk(players)  # projections changed, so ranks and spreads must be rebuilt
 state9 = make_state(
     picks=[
