@@ -268,6 +268,9 @@ cumulative, so a player who misses three games already ranks below an equal
 player who does not, and the week-by-week seating scores those missed weeks a
 second time by leaving him out of them.
 
+If a FantasyPros ranking fails to load, the command says which weeks fell back
+to Sleeper projections alone.
+
 #### `sleeper-fantasy-nfl-engine alerts`
 
 Snapshots every player's season projection and, on the next run, flags anyone

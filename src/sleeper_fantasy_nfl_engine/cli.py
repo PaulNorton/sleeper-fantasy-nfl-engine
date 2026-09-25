@@ -547,6 +547,15 @@ def waivers(
                                spare_spots=spare, limit=limit,
                                droppable=droppable_ids(row), runs=runs)
 
+        # A failed FantasyPros fetch must not pass Sleeper's numbers off as
+        # the blend. The two rankings fail separately, so say which weeks.
+        missing = horizon.sleeper_only
+        if missing:
+            weeks_text = (f"week {missing[0]}" if len(missing) == 1
+                          else f"weeks {missing[0]}–{missing[-1]}")
+            console.print(
+                f"[yellow]No expert consensus for {weeks_text} — Sleeper projections only.[/]"
+            )
         console.print(ui.week_outlook(sess.league, horizon, roster))
         console.print()
 

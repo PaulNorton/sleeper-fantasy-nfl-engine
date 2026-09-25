@@ -29,6 +29,7 @@ from sleeper_fantasy_nfl_engine.waivers import (
     INJURY_HAZARD,
     INJURY_PERSISTENCE,
     WORTH_DOING,
+    load_horizon,
     remaining_weeks,
     shortlist_free_agents,
     simulate,
@@ -123,6 +124,32 @@ crossed = Swap("QB", replace(mk("qb", "QB", 18.0), ecr=10.0, rank_std=4.0),
                replace(mk("def", "DEF", 7.0), ecr=11.0, rank_std=4.0))
 assert not crossed.close_call
 print("PASS: a start/sit call inside the experts' own disagreement is flagged as a coin flip")
+
+# 1c - a waiver horizon records which weeks lost their expert consensus, so
+# the command can say so rather than pass Sleeper's numbers off as the blend.
+# The weekly ranking covers only the imminent week, the rest-of-season one the
+# weeks after it, so each failure is pinned on its own weeks.
+from sleeper_fantasy_nfl_engine import waivers as waivers_module
+
+
+def _blocked(*_args, **_kwargs):
+    raise RuntimeError("FantasyPros unavailable")
+
+
+with SleeperClient() as client:
+    whole = load_horizon(client, league, "2025", [5, 6, 7])
+    assert whole.sleeper_only == [], whole.sleeper_only
+    for name, lost in (("load_ros_consensus", [6, 7]), ("load_weekly_consensus", [5])):
+        real = getattr(waivers_module, name)
+        setattr(waivers_module, name, _blocked)
+        try:
+            partial = load_horizon(client, league, "2025", [5, 6, 7])
+        finally:
+            setattr(waivers_module, name, real)
+        assert partial.sleeper_only == lost, (name, partial.sleeper_only)
+    asked_for_none = load_horizon(client, league, "2025", [5, 6, 7], consensus=False)
+    assert asked_for_none.sleeper_only == [], "--no-consensus is a choice, not a failure"
+print("PASS: a waiver horizon names the weeks that fell back to Sleeper alone")
 
 # 2 - the horizon only covers the weeks still to be played.
 assert remaining_weeks(9)[0] == 9 and remaining_weeks(9)[-1] == 17

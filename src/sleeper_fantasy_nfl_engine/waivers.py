@@ -145,6 +145,9 @@ class Horizon:
     # player_id -> (position, team). The simulation needs it to find who takes
     # over an injured player's work; a horizon without it simulates nobody.
     info: dict[str, tuple[str, str | None]] = field(default_factory=dict)
+    # Weeks whose projections carry no expert consensus, although it was asked
+    # for: the FantasyPros ranking they needed failed or came back empty.
+    sleeper_only: list[int] = field(default_factory=list)
 
     def week_points(self, week: int, player: Player) -> float:
         return self.points.get(week, {}).get(player.player_id, 0.0)
@@ -284,10 +287,15 @@ def load_horizon(
     with ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(one, weeks))
     info = {p.player_id: (p.position, p.team) for _wk, players in results for p in players}
+    sleeper_only = [
+        wk for wk in weeks
+        if consensus and not (weekly_rows if wk == imminent else ros_rows)
+    ]
     return Horizon(
         weeks=list(weeks),
         points={wk: {p.player_id: p.points for p in players} for wk, players in results},
         info=info,
+        sleeper_only=sleeper_only,
     )
 
 
