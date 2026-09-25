@@ -39,7 +39,9 @@ changes every recommendation, so they are commented and grouped:
 - `simulate.py` - how far actual draft position spreads around ADP.
 - `changes.py` - how far a projection has to move before `alerts` flags it.
 - `waivers.py` - what a move has to be worth before it is worth making, and
-  how few weeks a player can start in before he is a streamer, not an upgrade.
+  the injury and drift model that prices bench depth: how often players get
+  hurt, for how long, how much of the work a teammate inherits, and how far a
+  projection wanders.
 - `projections.py` - the three consensus weights (draft, weekly, rest of
   season). How much of every ordering comes from the experts rather than
   from Sleeper.
