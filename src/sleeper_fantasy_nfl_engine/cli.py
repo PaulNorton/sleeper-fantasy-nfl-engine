@@ -26,6 +26,7 @@ from .session import build_session, load_config, save_config
 from .simulate import RolloutConfig
 from .sleeper import SleeperClient, SleeperError
 from .waivers import (
+    SIMS,
     WORTH_DOING,
     best_moves,
     droppable_ids,
@@ -33,6 +34,7 @@ from .waivers import (
     open_roster_spots,
     remaining_weeks,
     shortlist_free_agents,
+    simulate,
 )
 
 app = typer.Typer(add_completion=False, help="Draft assistant for Sleeper leagues.")
@@ -500,16 +502,20 @@ def waivers(
         None, "--weeks",
         help="How many weeks ahead to value. Default is the rest of the season.",
     ),
+    sims: int = typer.Option(
+        SIMS, "--sims",
+        help="Simulated seasons behind every value. 0 takes projections at face value.",
+    ),
     projections: Optional[str] = OV,
     no_consensus: bool = NOFP,
     limit: int = typer.Option(8, "--limit", "-n", help="How many moves to list."),
 ) -> None:
-    """Decide whether to sign anyone, and who to drop to make room.
+    """Decide whether to sign anyone today, and who to drop to make room.
 
-    Adds and drops are one decision, so they are scored as a pair, on
-    rest-of-season points seated week by week. That is what makes a bye-week
-    crunch visible: a free agent who plays the week four of your starters are
-    out is worth what he plugs, and a season-total ranking cannot see it.
+    A signing is recommended only if it raises your rest-of-season total after
+    paying for the drop, and only if today is the time to make it. The drop is
+    priced by simulating injuries and changing roles, so a backup who covers
+    for your starters is not given away for nothing.
     """
     with SleeperClient() as client:
         sess = _season_session(client, username, league_id, season, roster_id,
@@ -534,54 +540,65 @@ def waivers(
             if position:
                 pool = [p for p in pool if p.position == position.upper()]
             pool = shortlist_free_agents(horizon, pool)
+        with console.status(f"simulating {sims} seasons…"):
+            runs = simulate(horizon, {p.player_id for p in roster + pool}, sims)
             spare = open_roster_spots(sess.league, row)
             moves = best_moves(sess.league, horizon, roster, pool,
                                spare_spots=spare, limit=limit,
-                               droppable=droppable_ids(row))
+                               droppable=droppable_ids(row), runs=runs)
 
         console.print(ui.week_outlook(sess.league, horizon, roster))
         console.print()
 
-        # A bye-week streamer is not a move to make today, however well he
-        # scores: the wire will still be offering his equivalent the week
-        # before you need him. Only moves worth acting on now can headline.
-        act_now = [m for m in moves if not m.can_wait and m.gain >= WORTH_DOING]
+        span = f"weeks {horizon_weeks[0]}–{horizon_weeks[-1]}"
+        act_now = [m for m in moves if m.act_now]
         best = act_now[0] if act_now else None
         if best is None:
-            waiting = next((m for m in moves if m.can_wait), None)
             console.print(
-                f"[green]Stand pat.[/] No signing clears {WORTH_DOING:.0f} points of "
-                f"rest-of-season value this week."
+                f"[green]Stand pat.[/] No signing made today adds {WORTH_DOING:.0f} points "
+                f"to your {span} total."
             )
+            waiting = next((m for m in moves if not m.act_now), None)
             if waiting:
                 console.print(
-                    f"[dim]Diarise: {waiting.reason()} — {waiting.add.name} and others like "
-                    f"him are worth about {waiting.gain:+.1f} then.[/]"
+                    f"[dim]Diarise week {waiting.sign_week}: {waiting.add.name} and others "
+                    f"like him are worth about {waiting.sign_value:+.1f} then.[/]"
                 )
         else:
-            drop = f", drop {best.drop.label}" if best.drop else " (you have a spare roster spot)"
+            if best.drop:
+                cost = (f" He adds {best.add_value:+.1f}; losing {best.drop.name} "
+                        f"costs {best.drop_cost:.1f} in injury and bye cover.")
+                drop = f", drop {best.drop.label}"
+            else:
+                cost, drop = "", " (you have a spare roster spot)"
             console.print(
                 f"[bold]Sign {best.add.label}{drop}.[/] Worth [green]{best.gain:+.1f}[/] "
-                f"points over weeks {horizon_weeks[0]}–{horizon_weeks[-1]}; he starts "
-                f"{best.starts} of the {len(horizon_weeks)} weeks left."
+                f"points over {span}.{cost}"
             )
         if not moves:
             raise typer.Exit(0)
 
         console.print()
-        table = Table("Sign", "Pos", "Tm", "Drop", "Gain", "Starts", "Where it lands",
-                      title=f"Weeks {horizon_weeks[0]}–{horizon_weeks[-1]}")
+        table = Table("Sign", "Pos", "Drop", "Adds", "Drop costs", "Net", "Starts", "When",
+                      title=f"{span}, {max(sims, 1)} simulated seasons")
         for m in moves:
             table.add_row(
                 m.add.label if m.add else "—",
                 m.add.position if m.add else "—",
-                (m.add.team or "FA") if m.add else "—",
                 m.drop.label if m.drop else "(spare spot)",
+                f"{m.add_value:+.1f}",
+                f"{-m.drop_cost:+.1f}" if m.drop else "—",
                 f"{m.gain:+.1f}",
-                str(m.starts),
-                Text(m.reason(), style="dim" if m.can_wait else ""),
+                f"{m.starts:.1f}",
+                Text(m.reason(), style="" if m.act_now else "dim"),
             )
         console.print(table)
+        console.print(Text(
+            "Adds: what he scores for you if nobody had to go. Drop costs: what the "
+            "dropped player would have scored for you covering byes, injuries and "
+            "changed roles. Starts: weeks he would start, on average.",
+            style="dim",
+        ))
         if spare:
             console.print(
                 Text(f"{spare} roster spot(s) open, so these need no drop.", style="dim")

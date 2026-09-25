@@ -26,8 +26,12 @@ from sleeper_fantasy_nfl_engine.waivers import (
     horizon_value,
     open_roster_spots,
     open_slots,
+    INJURY_HAZARD,
+    INJURY_PERSISTENCE,
+    WORTH_DOING,
     remaining_weeks,
     shortlist_free_agents,
+    simulate,
 )
 from harness import make_league
 
@@ -166,23 +170,52 @@ assert after[2] - before[2] == 7.0, (before, after)
 assert after[1] == before[1], "he should not displace a better starter in a normal week"
 print("PASS: a bye-week hole is scored honestly and a fill-in is credited for plugging it")
 
-# 8 - the same fill-in is reported as a move that can wait, because he starts
-# in one week out of three and that week is not this one. A genuine upgrade is
-# not deferred.
-moves = best_moves(two_wr, bye_horizon, [wr1, wr2, spare], [plugger], limit=5)
-assert moves and moves[0].add.player_id == "plugger", moves
+# 8 - timing. A fill-in whose only value is a future week is worth the same
+# signed now or then, so the date goes to the later week: no roster spot is
+# spent early. Whether to wait depends on the wire. With a second fill-in just
+# as good, he can wait. Alone, he is signed now, since waiting risks losing
+# him. A week-in-week-out upgrade is never deferred.
+plugger2 = mk("plugger2", "WR", 0.0)
+two_pluggers = Horizon(weeks=[1, 2, 3],
+                       points={**bye_horizon.points, 2: {"plugger": 7.0, "plugger2": 7.0}})
+moves = best_moves(two_wr, two_pluggers, [wr1, wr2, spare], [plugger, plugger2], limit=5)
+assert moves and moves[0].add.player_id in ("plugger", "plugger2"), moves
 assert moves[0].drop.player_id == "spare_rb", moves[0].drop
-assert moves[0].can_wait, "one start in a future week is bye cover, not an upgrade"
-assert "wait until week 1" in moves[0].reason(), moves[0].reason()
+assert moves[0].sign_week == 2 and moves[0].replaceable, moves[0]
+assert not moves[0].act_now, "a fill-in the wire can replace should wait for his week"
+assert "wait until week 2" in moves[0].reason(), moves[0].reason()
+assert len(moves) == 1, "interchangeable fill-ins collapse to one row"
+
+alone = best_moves(two_wr, bye_horizon, [wr1, wr2, spare], [plugger], limit=5)
+assert alone and not alone[0].replaceable and alone[0].act_now, alone
 
 upgrade_horizon = Horizon(
     weeks=[1, 2, 3],
     points={wk: {"wr1": 18.0, "wr2": 4.0, "plugger": 15.0} for wk in (1, 2, 3)},
 )
 steady = best_moves(two_wr, upgrade_horizon, [wr1, wr2, spare], [plugger], limit=5)
-assert steady and not steady[0].can_wait, "a player who starts every week cannot wait"
+assert steady and steady[0].act_now and steady[0].sign_week == 1, steady
 assert steady[0].gain > 0, steady[0].gain
-print("PASS: a one-week fill-in is deferred; a week-in-week-out upgrade is not")
+print("PASS: a replaceable fill-in waits for his week; a unique one or an upgrade is signed now")
+
+# 8b - a drop that still earns early weeks pushes the best date later. The
+# receiver being cut scores 12 in week 1 and 2 after that; the signing scores
+# 8 every week. Now is worth +8, week 2 is worth +12. Alone on the wire he is
+# still signed now, because +8 already clears the bar; with an equal rival on
+# the wire, waiting until week 2 costs nothing.
+fading = Horizon(weeks=[1, 2, 3], points={
+    1: {"wr1": 18.0, "wr2": 12.0, "plugger": 8.0, "plugger2": 7.5},
+    2: {"wr1": 18.0, "wr2": 2.0, "plugger": 8.0, "plugger2": 7.5},
+    3: {"wr1": 18.0, "wr2": 2.0, "plugger": 8.0, "plugger2": 7.5},
+})
+solo_fade = best_moves(two_wr, fading, [wr1, wr2], [plugger], limit=5)[0]
+assert solo_fade.drop.player_id == "wr2"
+assert abs(solo_fade.gain - 8.0) < 1e-6 and solo_fade.sign_week == 2, solo_fade
+assert abs(solo_fade.sign_value - 12.0) < 1e-6, solo_fade.sign_value
+assert solo_fade.act_now and "week 2 is worth +4.0 more" in solo_fade.reason(), solo_fade.reason()
+rival_fade = best_moves(two_wr, fading, [wr1, wr2], [plugger, plugger2], limit=5)[0]
+assert rival_fade.replaceable and not rival_fade.act_now, rival_fade
+print("PASS: a drop still earning early weeks moves the signing date later")
 
 # 9 - the add and the drop are scored as one decision, so a drop that actually
 # costs you is netted off rather than ignored.
@@ -191,6 +224,40 @@ assert costly, "with no spare spot a move must still be offered"
 assert costly[0].drop.player_id == "wr2", costly[0].drop
 assert abs(costly[0].gain - 3 * (15.0 - 4.0)) < 1e-6, costly[0].gain
 print("PASS: add and drop are netted as a single decision")
+
+# 9b - depth. A backup running back who never starts on today's projections
+# is free to drop at face value. In the simulated season his starter gets
+# hurt, the backup inherits the work, and dropping him has a price.
+rb_k = make_league(positions=["RB", "K", "BN"])
+rb1, rb2, kicker = mk("rb1", "RB", 0.0), mk("rb2", "RB", 0.0), mk("k1", "K", 0.0)
+depth_weeks = list(range(1, 11))
+depth = Horizon(
+    weeks=depth_weeks,
+    points={wk: {"rb1": 15.0, "rb2": 3.0, "k1": 8.0} for wk in depth_weeks},
+    info={"rb1": ("RB", "AAA"), "rb2": ("RB", "AAA"), "k1": ("K", "BBB")},
+)
+face = best_moves(rb_k, depth, [rb1, rb2], [kicker], limit=5)[0]
+assert face.drop.player_id == "rb2" and face.drop_cost == 0.0, face
+ids = {"rb1", "rb2", "k1"}
+runs = simulate(depth, ids, sims=2000)
+priced = best_moves(rb_k, depth, [rb1, rb2], [kicker], limit=5, runs=runs)[0]
+assert priced.drop.player_id == "rb2" and priced.drop_cost > 3.0, priced
+assert priced.gain < priced.add_value, "the drop is netted off the signing"
+print(f"PASS: a backup who covers injuries costs {priced.drop_cost:.1f} points to drop, "
+      f"not zero")
+
+# 9c - the injury model keeps a running back out about as often as designed,
+# and a player meets the same injuries whoever else is being simulated. That
+# is what makes two rosters comparable run by run.
+out_weeks = sum(1 for run in runs.points for row in run[1:] if row[runs.index["rb1"]] == 0.0)
+share = out_weeks / (len(runs.points) * (len(depth_weeks) - 1))
+expected = INJURY_HAZARD["RB"] / (INJURY_HAZARD["RB"] + 1 - INJURY_PERSISTENCE)
+assert abs(share - expected) < 0.03, (share, expected)
+narrow = simulate(depth, {"rb1"}, sims=50)
+assert all(a[narrow.index["rb1"]] == b[runs.index["rb1"]]
+           for ra, rb in zip(narrow.points, runs.points) for a, b in zip(ra, rb))
+print(f"PASS: running backs miss {share:.0%} of weeks, and the draws do not depend on "
+      f"who else is simulated")
 
 # 10 - shortlisting keeps the best of every position, not just the best overall.
 many = [mk(f"wr{i}", "WR", 0.0) for i in range(30)] + [mk("lone_te", "TE", 0.0)]

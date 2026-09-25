@@ -198,53 +198,75 @@ the consensus blend, since re-seating moves points between players.
 
 #### `sleeper-fantasy-nfl-engine waivers`
 
-Answers one question — should you sign anybody, and who do you drop for him.
-Signing and dropping are a single decision, so they are scored as a **pair**
-and ranked by what the pair is worth. Ranking them apart hides the case that
-matters: a good free agent you have no room for, and a droppable body you have
-no use for the spot.
+Answers one question: should you sign anybody today, and who do you drop for
+him. It recommends a signing only when both of these hold:
+
+1. **It raises your rest-of-season total**, after paying for the drop. The
+   drop's price includes the depth he gives you: the weeks he covers a bye,
+   an injury, or a starter who loses his job.
+2. **Today is the time to make it.** A later date can be worth more, and the
+   wire may still hold someone like him then.
 
 | Flag | Default | What it does |
 |---|---|---|
 | `--pos`, `-p` | all | Only consider one position. |
 | `--weeks` | rest of season | How many weeks ahead to value. `--weeks 3` asks "just get me through the next three". |
+| `--sims` | 1000 | Simulated seasons behind every value. `0` takes projections at face value, with no injuries. |
 | `--limit`, `-n` | 8 | How many moves to list. |
 
-The yardstick is **rest-of-season points, seated week by week**. Your roster
-is made into a starting lineup separately for every week left, using that
-week's own projections, and the weeks are summed. Three things fall out of
-that which a season-total ranking gets wrong:
-
-- **Byes need no special case.** A player on bye has no stat line that week,
-  so he is simply absent from it. If four of your receivers are out in week
-  14, the week-14 lineup seats whoever is left and scores the hole honestly.
-  The command opens by naming the weeks your roster cannot fill.
-- **Bench value stops being a fudge factor.** `BENCH_FACTOR` exists in the
-  draft model because a season-long view cannot see *when* a backup plays.
-  Here a bench player earns his keep in the weeks he is actually seated.
-- **Games already played do not count.** A season projection includes weeks
-  that are over. Only the weeks ahead can still be changed by a move.
-
-An empty starter slot scores **zero** here, not replacement level — the one
-place this deliberately parts company with the draft engine. The draft engine
+**The yardstick is rest-of-season points, seated week by week.** Your roster
+is made into a starting lineup separately for every week left, and the weeks
+are summed. Byes need no special case: a player on bye has no stat line that
+week, so the lineup seats whoever is left. Games already played do not count.
+An empty starter slot scores zero, not replacement level. The draft engine
 floors every slot at the waiver wire because it assumes you will stream
-someone eventually; that assumption is precisely what is being decided now, so
-keeping it would score every pickup at nothing.
+someone; that assumption is what is being decided here.
 
-Every week in the horizon carries expert consensus, not Sleeper alone. The
-imminent week gets the weekly ranking at the same 50/50 weight `lineup` uses.
-The weeks after it get the **rest-of-season** ranking at 0.35, because
-FantasyPros ranks only the next week ahead. The lower weight is deliberate: a
-rest-of-season rank is cumulative, so a player who misses three games already
-ranks below an equal player who does not, and the week-by-week seating scores
-those missed weeks a second time by leaving him out of them.
+**Depth is priced by simulation.** Taken at face value, projections say every
+starter plays every week at today's number, and a backup who never cracks the
+lineup is free to drop. So the weeks after this one are played out 1000 times:
 
-It also separates a signing from a *date*. A player who would start for you
-week after week is an upgrade: take him now, because he will not be there
-later. A player whose value is one future week is bye cover, and the wire will
-still be offering his equivalent the week before you need him — so the
-recommendation is "wait until week 7", not a signing that burns a roster spot
-for six weeks. Only moves worth acting on today can headline.
+- Players get hurt. A running back misses about 16% of weeks, a receiver or
+  tight end 12%, a quarterback 9%, each absence about three weeks long.
+- Part of an injured player's projection passes to his healthy teammates at the
+  same position. This is what a handcuff is worth.
+- Every projection drifts. After nine weeks a receiver's number is typically a
+  third higher or lower than today's: a job won or lost.
+
+Each week's lineup is seated on what you would know by then. A backup is worth
+what he scores in the runs where he is needed, and that is the cost of dropping
+him. Every roster meets the same injuries in the same runs, so the difference
+between two rosters is far steadier than either total. The constants live in
+`waivers.py`; they are judgement, not fitted.
+
+**A move has a date.** Signing in week k changes only weeks k onward, so each
+possible date has its own value. When the player you would drop still earns
+early weeks, a later date is worth more. Whether to wait depends on the wire:
+
+- If other free agents at his position are within 3 points of him, he is
+  replaceable. Sign him only if now is his best date; otherwise wait.
+- If nobody on the wire is close, sign him now, as long as signing now
+  already clears 3 points. Waiting is how you lose him.
+
+A tie between dates goes to the later one, so no roster spot is held early for
+nothing.
+
+The table shows the arithmetic behind each move. **Adds** is what he scores for
+you if nobody had to go. **Drop costs** is what the dropped player would have
+scored for you. **Net** is the difference, signing today. **Starts** is how
+many weeks he would start, on average. **When** is the verdict: `sign now`,
+or `wait until week N` with what the move is worth then.
+
+A player on IR or taxi is never offered as the drop. Releasing him frees his
+IR or taxi slot, not the active spot a signing needs.
+
+Every week carries expert consensus, not Sleeper alone. The imminent week gets
+the weekly ranking at the same 50/50 weight `lineup` uses. Later weeks get the
+**rest-of-season** ranking at 0.35, because FantasyPros ranks only the next
+week ahead. The lower weight is deliberate: a rest-of-season rank is
+cumulative, so a player who misses three games already ranks below an equal
+player who does not, and the week-by-week seating scores those missed weeks a
+second time by leaving him out of them.
 
 #### `sleeper-fantasy-nfl-engine alerts`
 

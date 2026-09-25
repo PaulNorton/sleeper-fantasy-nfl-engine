@@ -138,7 +138,8 @@ class LineupEvaluator:
         Entries are (ranking_key, payoff). Passing the same number twice scores a
         lineup on its own projections; passing (projection, realised) scores the
         lineup a manager would have set, on what actually happened.
-        Each pool must be sorted by ranking_key, descending.
+        Each pool must be sorted by ranking_key, descending. Anything after the
+        first two fields of an entry is ignored, so a caller can tag entries.
 
         Every slot is floored at replacement level, whether or not you drafted
         someone for it. An empty slot valued at zero makes drafting any kicker
@@ -156,7 +157,7 @@ class LineupEvaluator:
             pool = pools.get(pos) or []
             floor = self.replacement.get(pos, 0.0)
             take = min(count, len(pool))
-            total += sum(max(payoff, floor) for _key, payoff in pool[:take])
+            total += sum(max(entry[1], floor) for entry in pool[:take])
             total += (count - take) * floor
             used[pos] = take
         for _slot, count, eligible in self.flex:
