@@ -242,15 +242,32 @@ def _delta(after: dict[int, float], before: dict[int, float]) -> dict[int, float
     return {wk: after[wk] - before.get(wk, 0.0) for wk in after}
 
 
+def _parked(roster_row: dict) -> set[str]:
+    parked = {str(pid) for pid in (roster_row.get("reserve") or [])}
+    return parked | {str(pid) for pid in (roster_row.get("taxi") or [])}
+
+
 def open_roster_spots(league: LeagueSettings, roster_row: dict | None) -> int:
     """Active roster spots going spare. Players stashed on IR do not take one."""
     if not roster_row:
         return 0
     active_slots = sum(1 for slot in league.roster_positions if slot not in ("IR", "TAXI"))
-    parked = {str(pid) for pid in (roster_row.get("reserve") or [])}
-    parked |= {str(pid) for pid in (roster_row.get("taxi") or [])}
+    parked = _parked(roster_row)
     held = [pid for pid in (roster_row.get("players") or []) if str(pid) not in parked]
     return max(0, active_slots - len(held))
+
+
+def droppable_ids(roster_row: dict | None) -> set[str]:
+    """Players whose release frees an active roster spot.
+
+    A player stashed on IR or taxi holds a slot of his own. Releasing him frees
+    that slot, not the bench spot a signing needs, so Sleeper would refuse the
+    add. He is never the price of a move.
+    """
+    if not roster_row:
+        return set()
+    parked = _parked(roster_row)
+    return {str(pid) for pid in (roster_row.get("players") or []) if str(pid) not in parked}
 
 
 def shortlist_free_agents(
@@ -281,6 +298,7 @@ def best_moves(
     free_agents: list[Player],
     spare_spots: int = 0,
     limit: int = 10,
+    droppable: set[str] | None = None,
 ) -> list[Move]:
     """Rank add/drop pairs by what they are worth over the rest of the season.
 
@@ -289,6 +307,9 @@ def best_moves(
     second re-scores only the shortlisted combinations exactly, because an add
     and the drop that pays for it interact: dropping your third receiver is
     free until the receiver you signed is the one covering that bye.
+
+    `droppable` limits who can pay for a signing - see `droppable_ids`. None
+    means anyone on the roster.
     """
     # Every week is seated with its own evaluator, and every slot is floored at
     # zero rather than at replacement - see the module docstring.
@@ -322,6 +343,8 @@ def best_moves(
 
     drops: list[tuple[float, Player]] = []
     for held in roster:
+        if droppable is not None and held.player_id not in droppable:
+            continue
         rest = [p for p in roster if p.player_id != held.player_id]
         drops.append((base_total - _total(horizon_value(evaluator, horizon, rest)), held))
     drops.sort(key=lambda d: d[0])

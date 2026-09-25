@@ -28,6 +28,7 @@ from .sleeper import SleeperClient, SleeperError
 from .waivers import (
     WORTH_DOING,
     best_moves,
+    droppable_ids,
     load_horizon,
     open_roster_spots,
     remaining_weeks,
@@ -535,7 +536,8 @@ def waivers(
             pool = shortlist_free_agents(horizon, pool)
             spare = open_roster_spots(sess.league, row)
             moves = best_moves(sess.league, horizon, roster, pool,
-                               spare_spots=spare, limit=limit)
+                               spare_spots=spare, limit=limit,
+                               droppable=droppable_ids(row))
 
         console.print(ui.week_outlook(sess.league, horizon, roster))
         console.print()

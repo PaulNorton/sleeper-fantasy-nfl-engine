@@ -22,6 +22,7 @@ from sleeper_fantasy_nfl_engine.valuation import LineupEvaluator
 from sleeper_fantasy_nfl_engine.waivers import (
     Horizon,
     best_moves,
+    droppable_ids,
     horizon_value,
     open_roster_spots,
     open_slots,
@@ -205,6 +206,14 @@ ir_league = make_league(positions=["WR", "WR", "BN", "IR"])
 assert open_roster_spots(ir_league, {"players": ["a", "b", "c"], "reserve": []}) == 0
 assert open_roster_spots(ir_league, {"players": ["a", "b", "c"], "reserve": ["c"]}) == 1
 print("PASS: an IR stash frees an active roster spot")
+
+# 11b - and for the same reason he is never the drop that pays for a signing:
+# releasing him frees the IR slot, not the bench spot the new player needs.
+assert droppable_ids({"players": ["a", "b", "c"], "reserve": ["c"]}) == {"a", "b"}
+stashed = best_moves(two_wr, upgrade_horizon, [wr1, wr2, spare], [plugger], limit=5,
+                     droppable={"wr1", "wr2"})
+assert stashed and all(m.drop.player_id != "spare_rb" for m in stashed), stashed
+print("PASS: a player parked on IR is never offered as the drop")
 
 # 9 - alerts: no snapshot yet means no movers; a big projection swing between
 # two snapshots is flagged, a small one is not.
