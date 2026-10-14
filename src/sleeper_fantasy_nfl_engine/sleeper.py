@@ -25,6 +25,25 @@ class SleeperError(RuntimeError):
     pass
 
 
+def clear_cache(cache_dir: Path = DEFAULT_CACHE) -> int:
+    """Delete cached Sleeper and FantasyPros responses. Return how many went.
+
+    Projection snapshots share the directory but are not a cache: `alerts`
+    compares against them, so they stay.
+    """
+    if not cache_dir.exists():
+        return 0
+    doomed = [
+        p
+        for p in cache_dir.iterdir()
+        if p.name.startswith("fp_")
+        or (p.suffix == ".json" and not p.name.startswith("projection_snapshot_"))
+    ]
+    for p in doomed:
+        p.unlink()
+    return len(doomed)
+
+
 class SleeperClient:
     def __init__(self, cache_dir: Path | None = None, timeout: float = 20.0) -> None:
         self.cache_dir = cache_dir or DEFAULT_CACHE

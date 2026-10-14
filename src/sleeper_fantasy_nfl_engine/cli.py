@@ -24,7 +24,7 @@ from .recommend import recommend
 from .season import build_season_session
 from .session import build_session, load_config, save_config
 from .simulate import RolloutConfig
-from .sleeper import SleeperClient, SleeperError
+from .sleeper import SleeperClient, SleeperError, clear_cache
 from .waivers import (
     SIMS,
     WORTH_DOING,
@@ -39,6 +39,16 @@ from .waivers import (
 
 app = typer.Typer(add_completion=False, help="Draft assistant for Sleeper leagues.")
 console = Console()
+
+
+@app.callback()
+def main(
+    clear: bool = typer.Option(
+        False, "--clear-cache", help="Delete cached Sleeper and FantasyPros data before running."
+    ),
+) -> None:
+    if clear:
+        console.print(f"[dim]cleared {clear_cache()} cached responses[/dim]")
 
 
 def _opts(
