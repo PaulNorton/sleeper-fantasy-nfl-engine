@@ -35,6 +35,9 @@ changing the saved default.
 Every command reads `sleeper-fantasy-nfl-engine.json` for defaults, so after `setup` the flags are
 optional. Any flag overrides the saved value for that one run.
 
+`--clear-cache` goes before any command and deletes cached data first. See
+[Data sources](#data-sources).
+
 ### Shared flags
 
 These appear on `board`, `watch`, `roster` and `available`.
@@ -649,6 +652,17 @@ project.
   published 5-second crawl delay is honoured, with responses cached for six
   hours. The full projections tables are deliberately *not* taken: they load
   from `/ajax/`, which robots.txt disallows.
+
+Both caches live in `~/.cache/sleeper-fantasy-nfl-engine/`. To fetch fresh
+data, put `--clear-cache` before any command:
+
+```bash
+sleeper-fantasy-nfl-engine --clear-cache board
+```
+
+It deletes the cached Sleeper and FantasyPros responses, then runs the command.
+It keeps the projection snapshots that `alerts` compares against, because those
+are its baseline, not a cache.
 
 ## Checks
 
