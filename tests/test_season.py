@@ -320,6 +320,34 @@ rival_fade = best_moves(two_wr, fading, [wr1, wr2], [plugger, plugger2], limit=5
 assert rival_fade.replaceable and not rival_fade.act_now, rival_fade
 print("PASS: a drop still earning early weeks moves the signing date later")
 
+# 8c - who else wants him. Two equal fill-ins and nobody after them: wait. A
+# rival team with the same hole takes one of the two, which leaves none
+# spare, so the wait is no longer safe. A player the whole of Sleeper is
+# adding counts as one more claim.
+needy = [mk("their_wr", "WR", 0.0)]          # one receiver for two slots
+content = [mk("r1", "WR", 0.0), mk("r2", "WR", 0.0)]   # two who play every week
+league_wire = Horizon(weeks=[1, 2, 3], points={
+    wk: {**pts, "their_wr": 20.0, "r1": 20.0, "r2": 20.0}
+    for wk, pts in two_pluggers.points.items()
+})
+calm = best_moves(two_wr, league_wire, [wr1, wr2, spare], [plugger, plugger2], limit=5,
+                  rivals=[content])[0]
+assert calm.demand == 0 and calm.equals == 1 and calm.replaceable and not calm.act_now, calm
+chased = best_moves(two_wr, league_wire, [wr1, wr2, spare], [plugger, plugger2], limit=5,
+                    rivals=[needy, content])[0]
+assert chased.demand == 1 and not chased.replaceable and chased.act_now, chased
+hot = best_moves(two_wr, league_wire, [wr1, wr2, spare], [plugger, plugger2], limit=5,
+                 rivals=[content], trending={"plugger": 3, "plugger2": 400})
+hot = next(m for m in hot if m.add.player_id == "plugger")
+assert hot.trending == 3 and hot.rivals == 1 and hot.act_now, hot
+# The bid follows: the minimum when nobody else is after him, a share of the
+# budget when somebody is, and a larger share the less season is left.
+assert calm.bid(100, 0, 8) == 0 and calm.bid(100, 1, 8) == 1
+assert 1 <= chased.bid(100, 0, 8) < chased.bid(100, 0, 2) <= 50, (
+    chased.bid(100, 0, 8), chased.bid(100, 0, 2))
+print(f"PASS: a contested fill-in is signed now (bid {chased.bid(100, 0, 8)} of 100); "
+      f"an uncontested one waits")
+
 # 9 - the add and the drop are scored as one decision, so a drop that actually
 # costs you is netted off rather than ignored.
 costly = best_moves(two_wr, upgrade_horizon, [wr1, wr2], [plugger], limit=5)

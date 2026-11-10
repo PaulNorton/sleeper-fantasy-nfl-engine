@@ -131,6 +131,14 @@ class SleeperClient:
         """One week's pairings and scores. A future week has the pairings only."""
         return self._get(f"{V1}/league/{league_id}/matchups/{week}", ttl=ttl) or []
 
+    def trending(self, kind: str = "add", hours: int = 24, limit: int = 50) -> list[dict]:
+        """Players most added (or dropped) across every Sleeper league, most first."""
+        return self._get(
+            f"{V1}/players/nfl/trending/{kind}",
+            params=[("lookback_hours", str(hours)), ("limit", str(limit))],
+            ttl=1800,
+        ) or []
+
     def league_drafts(self, league_id: str) -> list[dict]:
         return self._get(f"{V1}/league/{league_id}/drafts", ttl=60) or []
 

@@ -118,6 +118,22 @@ TIMING_SLACK = 1.0
 STREAM_RANK = 3
 STREAM_SHARE = 0.85
 
+# Who else wants him. Judgement calls.
+#
+# A free agent is contested when another team in the league would gain at
+# least WORTH_DOING from him, or when he is among the TRENDING_TOP most added
+# players across all of Sleeper in the last day. The first is your league's
+# need; the second catches the manager who follows the crowd.
+TRENDING_TOP = 25
+
+# What a contested signing is worth bidding, as a share of the budget you have
+# left: gain / (gain + FAAB_GAIN_PER_WEEK * weeks left). The second term is
+# what the rest of the season's waivers are expected to offer, so the same
+# gain earns a larger share in December than in October. Never more than
+# FAAB_MAX_SHARE on one player. An uncontested signing gets the minimum bid.
+FAAB_GAIN_PER_WEEK = 6.0
+FAAB_MAX_SHARE = 0.5
+
 # How many candidates survive the cheap first pass into the exact pairwise one.
 # The shortlists only need to be wide enough to contain the real answer; every
 # pair beyond that is arithmetic nobody reads.
@@ -260,7 +276,27 @@ class Move:
     add_value: float = 0.0                   # what he adds if nobody had to go
     starts: float = 0.0                      # weeks left he would start, on average
     first_week: int = 0                      # the week being decided now
-    replaceable: bool = False                # the wire holds others about as good
+    equals: int = 0                          # others on the wire about as good
+    demand: int = 0                          # other teams he would help
+    trending: int | None = None              # rank among Sleeper's most added, if any
+
+    @property
+    def rivals(self) -> int:
+        """How many claims on him to expect besides yours."""
+        return self.demand + (1 if self.trending else 0)
+
+    @property
+    def replaceable(self) -> bool:
+        """The wire holds enough players like him to outlast the teams after him."""
+        return self.equals > self.rivals
+
+    def bid(self, budget: float, minimum: float, weeks_left: int) -> int:
+        """What to bid for him out of `budget` left, in whole dollars."""
+        if not self.rivals:
+            return int(math.ceil(minimum))
+        gain = max(self.gain, self.sign_value)
+        share = min(FAAB_MAX_SHARE, gain / (gain + FAAB_GAIN_PER_WEEK * max(1, weeks_left)))
+        return int(max(math.ceil(minimum) + 1, round(budget * share)))
 
     @property
     def drop_cost(self) -> float:
@@ -301,8 +337,8 @@ class Move:
         """Sign him today: he raises your season total and today is the time.
 
         Waiting is right only when the wire will still offer someone like him
-        later, and a later date is worth at least as much. A player with no
-        equal on the wire is signed as soon as the move pays, even if a later
+        later, and a later date is worth at least as much. A player the wire
+        cannot replace is signed as soon as the move pays, even if a later
         date would pay more, because waiting is how you lose him.
         """
         if self.gain < WORTH_DOING:
@@ -320,8 +356,9 @@ class Move:
         if self.act_now:
             if wait < TIMING_SLACK:
                 return "sign now"
-            return (f"sign now — week {self.sign_week} is worth {wait:+.1f} more, "
-                    f"but nobody like him will be left")
+            why = ("nobody like him is on the wire" if not self.equals
+                   else "more teams want him than the wire has like him")
+            return f"sign now — week {self.sign_week} is worth {wait:+.1f} more, but {why}"
         if self.worth_doing:
             return f"wait until week {self.sign_week} ({self.sign_value:+.1f} then)"
         return "not worth a move"
@@ -911,6 +948,8 @@ def best_moves(
     runs: Runs | None = None,
     floors: dict[int, dict[str, float]] | None = None,
     weights: dict[int, float] | None = None,
+    rivals: list[list[Player]] | None = None,
+    trending: dict[str, int] | None = None,
 ) -> list[Move]:
     """Rank signings by what they add to your rest-of-season total, net of the drop.
 
@@ -933,6 +972,10 @@ def best_moves(
     `weights` are what a point is worth in each week, from
     `standings.week_weights`. Every value a `Move` carries is weighted by them.
     Without them every week counts the same.
+
+    `rivals` are the other teams' rosters and `trending` is player_id -> rank
+    among Sleeper's most added. Together they say how contested a free agent
+    is, which decides whether waiting for a better date is safe.
     """
     evaluator = LineupEvaluator.from_league(league, {})
     if runs is None:
@@ -980,13 +1023,29 @@ def best_moves(
             if best is not None:
                 moves.append(best)
 
-    # Replaceable: somebody else at his position is worth about as much on his
+    # Equals: other free agents at his position worth about as much on their
     # own best date. Judged on today's wire, which is the best guess at what
     # the wire will hold by then.
     for move in moves:
-        rivals = [m.sign_value for m in moves
-                  if m.add.position == move.add.position and m is not move]
-        move.replaceable = any(v >= move.sign_value - WORTH_DOING for v in rivals)
+        move.equals = sum(
+            1 for m in moves
+            if m.add.position == move.add.position and m is not move
+            and m.sign_value >= move.sign_value - WORTH_DOING
+        )
+        rank = (trending or {}).get(move.add.player_id)
+        move.trending = rank if rank is not None and rank <= TRENDING_TOP else None
+
+    # Demand: the other teams he would lift by enough to be worth a claim.
+    # Taken at face value, one run and no weights: it only has to say whether
+    # a rival has a use for him, not what that use is worth.
+    if rivals and moves:
+        ids = {m.add.player_id for m in moves} | {p.player_id for team in rivals for p in team}
+        face = Runs.single(horizon, ids)
+        for team in rivals:
+            theirs = _Lineups(evaluator, face, team, floors)
+            for move in moves:
+                if sum(theirs.add(move.add)) >= WORTH_DOING:
+                    move.demand += 1
 
     moves = [m for m in moves if m.worth_doing]
     moves.sort(key=lambda m: (not m.act_now, -(m.gain if m.act_now else m.sign_value)))

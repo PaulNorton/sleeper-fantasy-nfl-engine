@@ -569,13 +569,25 @@ def waivers(
             if position:
                 pool = [p for p in pool if p.position == position.upper()]
             pool = shortlist_free_agents(horizon, pool)
+            # Who else is after the same players: the other rosters, and the
+            # players most added across Sleeper in the last day.
+            rivals = [
+                [horizon.players[str(pid)] for pid in (r.get("players") or [])
+                 if str(pid) in horizon.players]
+                for r in sess.rosters if int(r["roster_id"]) != sess.my_roster_id
+            ]
+            try:
+                trending = {str(t.get("player_id")): i
+                            for i, t in enumerate(client.trending("add"), start=1)}
+            except SleeperError:
+                trending = {}
         with console.status(f"simulating {sims} seasons…"):
             runs = simulate(horizon, {p.player_id for p in roster + pool}, sims)
             spare = open_roster_spots(sess.league, row)
             moves = best_moves(sess.league, horizon, roster, pool,
                                spare_spots=spare, limit=limit,
                                droppable=droppable_ids(row), runs=runs, floors=floors,
-                               weights=leverage.weights)
+                               weights=leverage.weights, rivals=rivals, trending=trending)
 
         # A failed FantasyPros fetch must not pass Sleeper's numbers off as
         # the blend. The two rankings fail separately, so say which weeks.
