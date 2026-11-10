@@ -34,9 +34,10 @@ equivalent measurement for a single week; applying it here would be an
 unvalidated transform dressed up as a correction.
 
 Expert consensus is blended in, though, because that is a second opinion
-rather than a transform. FantasyPros only publishes weekly rankings for the
-next week, so the weeks after it borrow the rest-of-season ranking instead,
-at a lower weight - see `load_horizon`.
+rather than a transform. FantasyPros publishes a weekly ranking for the next
+week only, so the imminent week takes that one and the weeks after it take the
+rest-of-season ranking, blended against each player's remaining total - see
+`load_horizon`.
 
 **Depth is priced by simulation.** Taken at face value, today's projections
 say every starter plays every remaining week at his current number. In that
@@ -63,16 +64,17 @@ from __future__ import annotations
 
 import math
 import random
+from bisect import bisect_left
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-from .fantasypros import load_ros_consensus, load_weekly_consensus
+from .fantasypros import Consensus, load_ros_consensus, load_weekly_consensus
 from .league import LeagueSettings
 from .projections import (
     ROS_CONSENSUS_WEIGHT,
     WEEKLY_CONSENSUS_WEIGHT,
     Player,
-    injury_multiplier,
+    blend_ranks,
     load_week_points,
     weekly_injury_multiplier,
 )
@@ -121,6 +123,27 @@ SCREEN_SIMS = 200
 INJURY_HAZARD = {"QB": 0.035, "RB": 0.065, "WR": 0.05, "TE": 0.05}
 INJURY_PERSISTENCE = 0.65
 
+# How a designation carried today plays out in later weeks. Judgement calls.
+#
+# `valuation.WEEKLY_STATUS_DISCOUNT` gives the chance a designated player
+# misses the imminent game. STATUS_LINGER is the chance that, having missed a
+# game, he misses the next one too, and it only applies to weeks Sleeper still
+# projects him to play: Sleeper already leaves out the weeks a player is
+# expected to miss. So this prices the return that slips, not the absence
+# everyone knows about. A player ruled Out misses the following week half the
+# time; one on injured reserve, who has to sit at least four games and often
+# more, 85% of the time.
+STATUS_LINGER = {"IR": 0.85, "PUP": 0.85, "NA": 0.8, "Sus": 0.8}
+DEFAULT_LINGER = 0.5
+
+# How far the rest-of-season blend may move a player's weeks, up or down. The
+# blend sets his total and Sleeper's weeks carry it. When Sleeper projects a
+# player for one week of the eight and the experts rank him as if he will play
+# several, the whole difference would land on that one week: a quarterback
+# projected for 2 points was handed 44. The experts may double Sleeper's
+# number or halve it, and no more.
+ROS_FACTOR_LIMIT = 2.0
+
 # Share of an injured player's projection that passes to healthy teammates at
 # his position, split in proportion to their own projections. This is what
 # makes a handcuff worth holding. A backup quarterback inherits most of the
@@ -141,16 +164,40 @@ class Horizon:
     """Every week left, and what each player is projected for in it."""
 
     weeks: list[int]
-    points: dict[int, dict[str, float]]      # week -> player_id -> points
+    # week -> player_id -> expected points: the projection times the chance he
+    # plays, given today's injury designation.
+    points: dict[int, dict[str, float]]
     # player_id -> (position, team). The simulation needs it to find who takes
     # over an injured player's work; a horizon without it simulates nobody.
     info: dict[str, tuple[str, str | None]] = field(default_factory=dict)
     # Weeks whose projections carry no expert consensus, although it was asked
     # for: the FantasyPros ranking they needed failed or came back empty.
     sleeper_only: list[int] = field(default_factory=list)
+    # week -> player_id -> points if he plays. The simulation starts from
+    # these and decides for itself who is out. Empty means `points` already is
+    # that number.
+    healthy: dict[int, dict[str, float]] = field(default_factory=dict)
+    # player_id -> today's injury designation, for players who carry one.
+    status: dict[str, str] = field(default_factory=dict)
+    # Everyone with a projection in any week left, by player_id.
+    players: dict[str, Player] = field(default_factory=dict)
+    # player_id -> FantasyPros positional rank, this week and rest of season.
+    week_rank: dict[str, int] = field(default_factory=dict)
+    ros_rank: dict[str, int] = field(default_factory=dict)
+    # player_id -> (average expert ROS rank, how far the experts are apart).
+    ros_ecr: dict[str, tuple[float, float]] = field(default_factory=dict)
 
     def week_points(self, week: int, player: Player) -> float:
         return self.points.get(week, {}).get(player.player_id, 0.0)
+
+    def ranks(self, player: Player) -> str:
+        """His FantasyPros ranks, e.g. "wk TE12 · ROS TE15". Empty if unranked."""
+        parts = []
+        if player.player_id in self.week_rank:
+            parts.append(f"wk {player.position}{self.week_rank[player.player_id]}")
+        if player.player_id in self.ros_rank:
+            parts.append(f"ROS {player.position}{self.ros_rank[player.player_id]}")
+        return " · ".join(parts)
 
 
 @dataclass
@@ -231,6 +278,36 @@ class Move:
         return "not worth a move"
 
 
+def _no_discount(_status: str | None) -> float:
+    return 1.0
+
+
+def availability(status: str | None, weeks_ahead: int) -> float:
+    """Chance a player with this designation plays, `weeks_ahead` from now."""
+    out_now = 1.0 - weekly_injury_multiplier(status)
+    if weeks_ahead <= 0:
+        return 1.0 - out_now
+    return 1.0 - out_now * STATUS_LINGER.get(status or "", DEFAULT_LINGER) ** weeks_ahead
+
+
+def _expert_ranks(players: list[Player], rows: list[Consensus]) -> dict[str, int]:
+    """player_id -> positional rank on the experts' own list.
+
+    Counted over every row of the ranking, not only the rows that matched a
+    player here, so "TE15" means what it means on the FantasyPros page.
+    """
+    listed: dict[str, list[float]] = {}
+    for r in rows:
+        listed.setdefault(r.position, []).append(r.ecr)
+    for ecrs in listed.values():
+        ecrs.sort()
+    return {
+        p.player_id: bisect_left(listed[p.position], p.ecr) + 1
+        for p in players
+        if p.ecr is not None and p.position in listed
+    }
+
+
 def load_horizon(
     client: SleeperClient,
     league: LeagueSettings,
@@ -241,19 +318,40 @@ def load_horizon(
 ) -> Horizon:
     """Fetch every remaining week's projections, expert consensus included.
 
+    Each week starts as Sleeper's projection for that week. Two FantasyPros
+    rankings are then blended in, each against the thing it ranks.
+
+    **The imminent week** takes the weekly ranking, the way `lineup` does, and
+    then the hard weekly injury discount: Out means he does not play.
+
+    **The weeks after it** take the rest-of-season ranking. A rest-of-season
+    rank is a claim about a total, so it is blended against a total. Every
+    player's remaining weeks are summed, each weighted by the chance he plays
+    it. The position is re-seated on that curve of totals by a blend of
+    Sleeper's order and the experts'. Each of his weeks is then scaled by the
+    same factor, so his total matches the blended one. Sleeper keeps the
+    shape: byes, matchups and expected return dates. The experts move the
+    level, within `ROS_FACTOR_LIMIT`. The total always spans the rest of the season, whatever `weeks`
+    asks for, because that is what the experts ranked.
+
+    Blending week by week instead would count an absence twice: the experts
+    rank a player with a bye still ahead below an equal player without one,
+    and the week-by-week seating then leaves him out of that week as well.
+
     Fetched in parallel because this is 6 positions per week and the weeks do
     not depend on each other. Each (week, position) is a distinct cache entry,
     so the threads never write the same file. The two FantasyPros rankings are
     fetched once, up front and in series, because they share a crawl delay.
     """
-    imminent = weeks[0] if weeks else 0
+    if not weeks:
+        return Horizon(weeks=[], points={})
+    imminent = weeks[0]
 
     weekly_rows: list = []
     ros_rows: list = []
     if consensus:
         # A failed or blocked ranking must not take the whole waiver run with
-        # it; without it the horizon is Sleeper-only, which is what it used to
-        # be in every week.
+        # it; without it the horizon is Sleeper-only for the weeks it covers.
         try:
             weekly_rows = load_weekly_consensus(league.scoring_format, client.cache_dir)
         except Exception:
@@ -263,39 +361,71 @@ def load_horizon(
         except Exception:
             pass
 
+    season_weeks = sorted(set(remaining_weeks(imminent)) | set(weeks))
+
     def one(week: int) -> tuple[int, list[Player]]:
-        # Today's injury designation is a fact about this week's game and a
-        # rumour about any later one, so only the imminent week gets the hard
-        # weekly discount. TTL follows the same logic: a projection for the
-        # week being played moves with every practice report, one for week 14
-        # does not.
-        #
-        # The consensus splits on the same line. FantasyPros ranks the next
-        # week and no further, so only the imminent week gets the weekly
-        # ranking; the rest get the rest-of-season one, which is a durable
-        # view of a player rather than a view of any particular fixture.
-        near = week == imminent
-        players = load_week_points(
+        # A projection for the week being played moves with every practice
+        # report; one for week 14 does not.
+        return week, load_week_points(
             client, league, season, week,
-            status_discount=weekly_injury_multiplier if near else injury_multiplier,
-            ttl=3600 if near else 86400,
-            consensus=weekly_rows if near else ros_rows,
-            consensus_weight=WEEKLY_CONSENSUS_WEIGHT if near else ROS_CONSENSUS_WEIGHT,
+            status_discount=_no_discount,
+            ttl=3600 if week == imminent else 86400,
         )
-        return week, players
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        results = list(pool.map(one, weeks))
-    info = {p.player_id: (p.position, p.team) for _wk, players in results for p in players}
+        raw = dict(pool.map(one, season_weeks))
+    near = load_week_points(client, league, season, imminent,
+                            consensus=weekly_rows or None, ttl=3600)
+
+    players: dict[str, Player] = {p.player_id: p for p in near}
+    for week in season_weeks:
+        for p in raw[week]:
+            players.setdefault(p.player_id, p)
+    status = {pid: p.injury_status for pid, p in players.items() if p.injury_status}
+    ahead = {week: week - imminent for week in season_weeks}
+
+    def plays(pid: str, week: int) -> float:
+        return availability(status.get(pid), ahead[week])
+
+    # Sleeper's own expected total for the rest of the season.
+    total: dict[str, float] = {}
+    for week in season_weeks:
+        for p in raw[week]:
+            total[p.player_id] = total.get(p.player_id, 0.0) + p.points * plays(p.player_id, week)
+    seats = [replace(players[pid], points=pts, ecr=None, rank_std=0.0)
+             for pid, pts in total.items() if pts > 0]
+    if ros_rows:
+        blend_ranks(seats, ros_rows, ROS_CONSENSUS_WEIGHT, unranked_last=True)
+    factor = {
+        p.player_id: min(ROS_FACTOR_LIMIT,
+                         max(1.0 / ROS_FACTOR_LIMIT, p.points / total[p.player_id]))
+        for p in seats
+    }
+
+    healthy: dict[int, dict[str, float]] = {}
+    points: dict[int, dict[str, float]] = {}
+    for week in weeks:
+        if week == imminent:
+            points[week] = {p.player_id: p.points for p in near}
+            continue
+        healthy[week] = {p.player_id: p.points * factor.get(p.player_id, 1.0) for p in raw[week]}
+        points[week] = {pid: pts * plays(pid, week) for pid, pts in healthy[week].items()}
+
     sleeper_only = [
         wk for wk in weeks
         if consensus and not (weekly_rows if wk == imminent else ros_rows)
     ]
     return Horizon(
         weeks=list(weeks),
-        points={wk: {p.player_id: p.points for p in players} for wk, players in results},
-        info=info,
+        points=points,
+        info={pid: (p.position, p.team) for pid, p in players.items()},
         sleeper_only=sleeper_only,
+        healthy=healthy,
+        status=status,
+        players=players,
+        week_rank=_expert_ranks(near, weekly_rows),
+        ros_rank=_expert_ranks(seats, ros_rows),
+        ros_ecr={p.player_id: (p.ecr, p.rank_std) for p in seats if p.ecr is not None},
     )
 
 
@@ -337,7 +467,9 @@ def simulate(
     set that week's lineup. An injured player scores zero, and part of his
     projection passes to his healthy teammates at the same position. The
     imminent week is left as it is: its projections already carry this week's
-    practice reports.
+    practice reports. A player who carries an injury designation today starts
+    each run hurt as often as that designation says, and stays out for as long
+    as `STATUS_LINGER` gives him.
 
     Each player draws from a random stream of his own, seeded by his id. Any
     two rosters therefore meet the same injuries in the same runs, which is
@@ -364,7 +496,11 @@ def simulate(
     col = {pid: i for i, pid in enumerate(order)}
     keep = sorted(player_ids)
     keep_cols = [col[pid] for pid in keep]
-    base = [[horizon.points.get(wk, {}).get(pid) for pid in order] for wk in later]
+    base = [[horizon.healthy.get(wk, horizon.points.get(wk, {})).get(pid) for pid in order]
+            for wk in later]
+    # Chance each player misses the imminent game, and how sticky that is.
+    out_now = [1.0 - weekly_injury_multiplier(horizon.status.get(pid)) for pid in order]
+    linger = [STATUS_LINGER.get(horizon.status.get(pid, ""), DEFAULT_LINGER) for pid in order]
     info = [horizon.info.get(pid, ("", None)) for pid in order]
     mates = [[col[m] for m in units.get((team, pos), ()) if m != pid] if team else []
              for pid, (pos, team) in zip(order, info)]
@@ -382,8 +518,15 @@ def simulate(
             hazard = INJURY_HAZARD.get(pos, 0.0)
             z = rng.gauss(0.0, 1.0) if drift else 0.0
             out = [False] * len(later)
+            week = 0
+            if out_now[c] and rng.random() < out_now[c]:
+                # Hurt today. He stays out until the absence ends, and only
+                # then is he exposed to a new injury.
+                week = _geometric(rng, 1.0 - linger[c])
+                for k in range(min(len(later), week)):
+                    out[k] = True
             if hazard:
-                week = _geometric(rng, hazard)
+                week += _geometric(rng, hazard)
                 while week < len(later):
                     length = 1 + _geometric(rng, 1.0 - INJURY_PERSISTENCE)
                     for k in range(week, min(len(later), week + length)):

@@ -64,15 +64,14 @@ DEFAULT_SHRINKAGE = 0.85
 #               claim about the same thing. Split it evenly.
 #   WEEKLY 0.5  Same argument for one week, and the experts see the practice
 #               reports and the game script that Sleeper's number does not.
-#   ROS    0.35 A rest-of-season rank is *cumulative*: a player who misses
-#               three games ranks below an equal player who does not. The
-#               week-by-week seating in `waivers.py` already scores those
-#               missed weeks, by leaving him out of them. Weighting the ROS
-#               order as heavily as the weekly one would dock him twice for
-#               the same absence, so it gets less.
+#   ROS    0.5  A rest-of-season rank is a claim about a *total*, so it is
+#               blended against a total: each player's remaining weeks summed.
+#               `waivers.load_horizon` does that and keeps Sleeper's week-by-
+#               week shape. Compared like for like, the argument for an even
+#               split is the same as for the other two.
 DRAFT_CONSENSUS_WEIGHT = 0.5
 WEEKLY_CONSENSUS_WEIGHT = 0.5
-ROS_CONSENSUS_WEIGHT = 0.35
+ROS_CONSENSUS_WEIGHT = 0.5
 
 
 # Positions Sleeper reports that no lineup slot accepts under their own name.

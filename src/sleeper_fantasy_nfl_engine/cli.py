@@ -545,8 +545,14 @@ def waivers(
         ):
             horizon = load_horizon(client, sess.league, sess.season, horizon_weeks,
                                    consensus=not no_consensus)
-            roster = sess.my_players()
-            pool = sess.free_agents()
+            # Built from the weekly projections, not the season ones: a
+            # player who has earned a role since the season projections were
+            # written has a weekly number and may have no season number.
+            taken = sess.rostered_ids()
+            mine = [str(pid) for pid in (row.get("players") or [])]
+            roster = [horizon.players.get(pid) or sess.players.get(pid) for pid in mine]
+            roster = [p for p in roster if p is not None]
+            pool = [p for pid, p in horizon.players.items() if pid not in taken]
             if position:
                 pool = [p for p in pool if p.position == position.upper()]
             pool = shortlist_free_agents(horizon, pool)

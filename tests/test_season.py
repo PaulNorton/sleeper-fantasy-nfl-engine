@@ -28,7 +28,9 @@ from sleeper_fantasy_nfl_engine.waivers import (
     open_slots,
     INJURY_HAZARD,
     INJURY_PERSISTENCE,
+    ROS_FACTOR_LIMIT,
     WORTH_DOING,
+    availability,
     load_horizon,
     remaining_weeks,
     shortlist_free_agents,
@@ -170,6 +172,55 @@ with SleeperClient() as client:
     asked_for_none = load_horizon(client, league, "2025", [5, 6, 7], consensus=False)
     assert asked_for_none.sleeper_only == [], "--no-consensus is a choice, not a failure"
 print("PASS: a waiver horizon names the weeks that fell back to Sleeper alone")
+
+# 1f - the horizon carries both FantasyPros rankings, each against the thing
+# it ranks: the weekly one on the imminent week, the rest-of-season one on
+# every player's remaining total. The later weeks keep Sleeper's shape, so a
+# bye stays a bye, and no week moves further than the limit allows.
+with SleeperClient() as client:
+    blended = load_horizon(client, league, "2025", [5, 6, 7])
+    plain = load_horizon(client, league, "2025", [5, 6, 7], consensus=False)
+assert blended.week_rank and blended.ros_rank, "both rankings should reach the horizon"
+assert set(blended.points[6]) == set(plain.points[6]), "the blend must not add or drop a week"
+moved = [pid for pid, pts in plain.healthy[6].items()
+         if pts > 5 and abs(blended.healthy[6][pid] - pts) > 0.2]
+assert moved, "the rest-of-season ranking changed nobody's later weeks"
+for pid, pts in plain.healthy[6].items():
+    if pts > 0:
+        ratio = blended.healthy[6][pid] / pts
+        assert 1 / ROS_FACTOR_LIMIT - 1e-6 <= ratio <= ROS_FACTOR_LIMIT + 1e-6, (pid, ratio)
+# One factor per player: his later weeks all move by the same share.
+both = [pid for pid in moved if plain.healthy[7].get(pid, 0) > 5]
+assert both, "nobody plays both later weeks"
+for pid in both[:20]:
+    r6 = blended.healthy[6][pid] / plain.healthy[6][pid]
+    r7 = blended.healthy[7][pid] / plain.healthy[7][pid]
+    assert abs(r6 - r7) < 1e-6, (pid, r6, r7)
+print(f"PASS: the rest-of-season ranking moved {len(moved)} players' later weeks, "
+      f"one factor each, shape kept")
+
+# 1g - an injury designation is a fact about this week and a fading one about
+# later weeks. A player ruled Out is close to certain to miss the imminent
+# game, likelier than not to play the week after next, and a healthy player
+# is untouched. In the simulation he starts hurt as often as that says.
+assert availability(None, 0) == 1.0 and availability(None, 3) == 1.0
+assert availability("Out", 0) < 0.05 < availability("Out", 1) < availability("Out", 2) < 1.0
+assert availability("IR", 1) < availability("Out", 1), "injured reserve keeps a player longer"
+hurt_h = Horizon(
+    weeks=[1, 2, 3, 4],
+    points={wk: {"a": 10.0, "b": 10.0} for wk in (1, 2, 3, 4)},
+    info={"a": ("WR", "AAA"), "b": ("WR", "BBB")},
+    status={"a": "Out"},
+)
+hurt_runs = simulate(hurt_h, {"a", "b"}, sims=3000)
+def _missed(pid, wk_index):
+    c = hurt_runs.index[pid]
+    return sum(1 for run in hurt_runs.points if run[wk_index][c] == 0.0) / len(hurt_runs.points)
+assert abs(_missed("a", 1) - (1 - availability("Out", 1))) < 0.05, _missed("a", 1)
+assert _missed("a", 1) > _missed("b", 1) + 0.25, (_missed("a", 1), _missed("b", 1))
+assert _missed("a", 3) < _missed("a", 1), "he is likelier to be back the longer it runs"
+print(f"PASS: a player ruled Out misses next week in {_missed('a', 1):.0%} of runs, "
+      f"a healthy one in {_missed('b', 1):.0%}")
 
 # 2 - the horizon only covers the weeks still to be played.
 assert remaining_weeks(9)[0] == 9 and remaining_weeks(9)[-1] == 17
