@@ -288,7 +288,9 @@ def load_week_points(
     points curve by a mix of Sleeper's order and the experts'. Sleeper
     publishes one projection; the weekly consensus is 70-odd analysts who have
     read the practice report, and taking only the first is what made this
-    week's lineup a repeat of Sleeper's own start/sit page.
+    week's lineup a repeat of Sleeper's own start/sit page. A player the
+    experts did not rank at all sits below everyone they did - see
+    `blend_ranks`.
 
     The blend runs *before* `status_discount`, and the order is not incidental.
     Re-seating moves points between players, so discounting first would hand a
@@ -314,7 +316,7 @@ def load_week_points(
 
     result = _dedupe(players)
     if consensus:
-        blend_ranks(result, consensus, consensus_weight)
+        blend_ranks(result, consensus, consensus_weight, unranked_last=True)
     for p in result:
         p.points = round(p.points * status_discount(p.injury_status), 1)
     return result
@@ -402,12 +404,21 @@ def apply_vorp(players: list[Player], levels: dict[str, float]) -> None:
 # ---------- optional overrides from your own projection source ----------
 
 
+# Names the two sources spell differently. FantasyPros on the left, the name
+# Sleeper uses on the right, both already normalised.
+NAME_ALIAS = {
+    "hollywood brown": "marquise brown",
+    "bam knight": "zonovan knight",
+}
+
+
 def _norm(name: str) -> str:
     keep = "".join(ch for ch in name.lower() if ch.isalnum() or ch == " ")
     for suffix in (" jr", " sr", " ii", " iii", " iv", " v"):
         if keep.endswith(suffix):
             keep = keep[: -len(suffix)]
-    return " ".join(keep.split())
+    keep = " ".join(keep.split())
+    return NAME_ALIAS.get(keep, keep)
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
@@ -504,7 +515,10 @@ def _density(rows: list[Consensus]) -> dict[str, float]:
 
 
 def blend_ranks(
-    players: list[Player], rows: list[Consensus], weight: float = DRAFT_CONSENSUS_WEIGHT
+    players: list[Player],
+    rows: list[Consensus],
+    weight: float = DRAFT_CONSENSUS_WEIGHT,
+    unranked_last: bool = False,
 ) -> int:
     """Re-seat each position on its own points curve by a blended ranking.
 
@@ -516,13 +530,30 @@ def blend_ranks(
     Positions are blended one at a time, so a ranking that covers only some of
     them - or that orders positions against each other differently from this
     league - changes nothing outside the positions it lists.
+
+    `unranked_last` decides what a player the experts left out is worth. Off,
+    he keeps his Sleeper rank, which suits the draft cheatsheet: it stops at a
+    few hundred names and the players below it are simply deep. On, he ranks
+    below everyone the experts did list. That suits the in-season rankings,
+    which cover every player the experts would consider starting: being left
+    off one is an opinion, not an omission. Without it a blended player
+    carries half the experts' doubt and an unlisted one carries none, so the
+    unlisted player wins a comparison he should lose.
     """
     index = {(_norm(p.name), p.position): p for p in players}
+    by_name: dict[str, list[Player]] = {}
+    for p in players:
+        by_name.setdefault(_norm(p.name), []).append(p)
     matched = 0
     density = _density(rows)
     for r in rows:
         target = index.get((_norm(r.name), r.position))
         if target is None:
+            # The sources can disagree about a position. A name only one
+            # player answers to is still that player.
+            same_name = by_name.get(_norm(r.name)) or []
+            target = same_name[0] if len(same_name) == 1 else None
+        if target is None or target.ecr is not None and target.position != r.position:
             continue
         target.ecr = r.ecr
         target.rank_std = r.rank_std
@@ -540,11 +571,14 @@ def blend_ranks(
         sleeper_rank = {p.player_id: i + 1 for i, p in enumerate(group)}
         rated = sorted([p for p in group if p.ecr is not None], key=lambda p: p.ecr or 0.0)
         ecr_rank = {p.player_id: i + 1 for i, p in enumerate(rated)}
+        sink = unranked_last and bool(rated)
 
-        def blended(p: Player, _s=sleeper_rank, _e=ecr_rank) -> float:
+        def blended(p: Player, _s=sleeper_rank, _e=ecr_rank, _n=len(rated), _sink=sink) -> float:
             e_rank = _e.get(p.player_id)
             if e_rank is None:
-                return _s[p.player_id]
+                if not _sink:
+                    return _s[p.player_id]
+                e_rank = max(_n + 1, _s[p.player_id])
             return weight * e_rank + (1 - weight) * _s[p.player_id]
 
         for rank, (player, points) in enumerate(zip(sorted(group, key=blended), curve), start=1):

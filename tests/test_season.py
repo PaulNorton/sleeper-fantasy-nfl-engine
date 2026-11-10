@@ -108,6 +108,26 @@ assert next(p for p in board if p.name == "c").pos_rank == 1
 assert next(p for p in board if p.name == "lone_k").points == 8.0
 print("PASS: blend_ranks re-seats one position's curve and leaves the others alone")
 
+# 1d2 - a player the in-season experts left out ranks below everyone they
+# listed, instead of keeping a Sleeper rank that carries none of their doubt.
+# And a row matches on name alone when the two sources disagree on position.
+field_ = [mk("listed1", "WR", 20.0), mk("unlisted", "WR", 18.0), mk("listed2", "WR", 16.0),
+          mk("listed3", "WR", 14.0), mk("hybrid", "TE", 9.0)]
+rows_ = [rank_row("listed1", "WR", 1), rank_row("listed2", "WR", 2),
+         rank_row("listed3", "WR", 3), rank_row("hybrid", "WR", 4)]
+kept = [replace(p) for p in field_]
+blend_ranks(kept, rows_, weight=0.5)
+assert next(p for p in kept if p.name == "unlisted").pos_rank == 2, "the draft blend is unchanged"
+sunk = [replace(p) for p in field_]
+blend_ranks(sunk, rows_, weight=0.5, unranked_last=True)
+assert next(p for p in sunk if p.name == "unlisted").pos_rank == 3, [
+    (p.name, p.pos_rank) for p in sunk]
+last = [replace(p) for p in field_]
+blend_ranks(last, rows_, weight=1.0, unranked_last=True)
+assert next(p for p in last if p.name == "unlisted").pos_rank == 4, "the experts alone put him last"
+assert next(p for p in sunk if p.name == "hybrid").ecr == 4, "matched on name across positions"
+print("PASS: an unlisted player sinks below the listed ones in the in-season blend")
+
 # 1e - a swap the experts do not separate is reported as a coin flip, and one
 # they do is not.
 close = Swap("WR", replace(mk("x", "WR", 12.0), ecr=10.0, rank_std=4.0),
