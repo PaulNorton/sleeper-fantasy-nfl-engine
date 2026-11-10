@@ -3,19 +3,22 @@
 import time
 from dataclasses import fields, replace
 
-from sleeper_fantasy_nfl_engine.projections import attach_risk
+from sleeper_fantasy_nfl_engine.projections import _norm, attach_risk
 from sleeper_fantasy_nfl_engine.recommend import recommend
 from sleeper_fantasy_nfl_engine.simulate import RolloutConfig, availability
 from harness import SUPERFLEX, load, make_league, make_state, pick_row
 
 league = make_league()
 players, replacement = load(league)
-by_name = {p.name: p for p in players}
+# Keyed on the normalised name: Sleeper adds and drops suffixes between
+# seasons ("James Cook" became "James Cook III"), and the checks should not
+# care which spelling is live.
+by_name = {_norm(p.name): p for p in players}
 CFG = RolloutConfig(sims=60)
 
 
 def take(*names):
-    return [by_name[n] for n in names]
+    return [by_name[_norm(n)] for n in names]
 
 
 def board(roster_players, opponent_count, my_picks, lg=league, pool=players, rep=replacement,
@@ -121,7 +124,7 @@ assert r4[0].player.position in ("K", "DEF"), "ignored a mandatory empty slot"
 print("PASS: fills mandatory slots before the draft ends")
 
 # 5 - a player who fell far past his ADP must not look permanently available
-gibbs = by_name["Jahmyr Gibbs"]
+gibbs = by_name[_norm("Jahmyr Gibbs")]
 early = availability(gibbs, 20, 1)
 fallen = availability(gibbs, 60, 40)
 print(f"\nGibbs available: pick 1->20 {early:.0%}, pick 40->60 {fallen:.0%}")
