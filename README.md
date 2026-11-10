@@ -183,7 +183,8 @@ The ranking is Sleeper's weekly projection blended 50/50 with FantasyPros'
 weekly expert consensus, the same way the draft board blends the cheatsheet:
 as a *ranking*, so each position is re-seated on its own points curve. Sleeper
 publishes one projection; the consensus is 70-odd analysts who have read the
-practice report. Pass `--no-consensus` to rank on Sleeper alone.
+practice report. A player the experts left off the ranking sits below everyone
+they listed. Pass `--no-consensus` to rank on Sleeper alone.
 
 FantasyPros publishes weekly rankings for the upcoming week only, so
 `--week` set to a later one falls back to Sleeper and says so, rather than
@@ -204,9 +205,7 @@ the consensus blend, since re-seating moves points between players.
 Answers one question: should you sign anybody today, and who do you drop for
 him. It recommends a signing only when both of these hold:
 
-1. **It raises your rest-of-season total**, after paying for the drop. The
-   drop's price includes the depth he gives you: the weeks he covers a bye,
-   an injury, or a starter who loses his job.
+1. **It raises your rest-of-season total**, after paying for the drop.
 2. **Today is the time to make it.** A later date can be worth more, and the
    wire may still hold someone like him then.
 
@@ -216,63 +215,98 @@ him. It recommends a signing only when both of these hold:
 | `--weeks` | rest of season | How many weeks ahead to value. `--weeks 3` asks "just get me through the next three". |
 | `--sims` | 1000 | Simulated seasons behind every value. `0` takes projections at face value, with no injuries. |
 | `--limit`, `-n` | 8 | How many moves to list. |
+| `--equal-weeks` | off | Count a point the same in every week. |
 
 **The yardstick is rest-of-season points, seated week by week.** Your roster
 is made into a starting lineup separately for every week left, and the weeks
 are summed. Byes need no special case: a player on bye has no stat line that
 week, so the lineup seats whoever is left. Games already played do not count.
-An empty starter slot scores zero, not replacement level. The draft engine
-floors every slot at the waiver wire because it assumes you will stream
-someone; that assumption is what is being decided here.
 
-**Depth is priced by simulation.** Taken at face value, projections say every
-starter plays every week at today's number, and a backup who never cracks the
-lineup is free to drop. So the weeks after this one are played out 1000 times:
+**Both FantasyPros rankings are in every number.** Each week starts as
+Sleeper's projection for that week.
 
-- Players get hurt. A running back misses about 16% of weeks, a receiver or
-  tight end 12%, a quarterback 9%, each absence about three weeks long.
-- Part of an injured player's projection passes to his healthy teammates at the
-  same position. This is what a handcuff is worth.
-- Every projection drifts. After nine weeks a receiver's number is typically a
-  third higher or lower than today's: a job won or lost.
+- The imminent week is blended 50/50 with the **weekly ranking**, the way
+  `lineup` does it.
+- The weeks after it are blended 50/50 with the **rest-of-season ranking**. A
+  rest-of-season rank is a claim about a total, so it is blended against a
+  total: each player's remaining weeks are summed, the position is re-seated
+  on that curve, and his weeks are scaled to match. Sleeper keeps the shape -
+  byes, matchups, return dates. The experts move the level.
+- A player the experts left off a ranking sits below everyone they listed.
 
-Each week's lineup is seated on what you would know by then. A backup is worth
-what he scores in the runs where he is needed, and that is the cost of dropping
-him. Every roster meets the same injuries in the same runs, so the difference
-between two rosters is far steadier than either total. The constants live in
-`waivers.py`; they are judgement, not fitted.
+Under each name the table prints his FantasyPros rank for this week and the
+rest of the season (`TE wk12 ros15`). When you swap two players at one
+position and the rest-of-season ranking disagrees with the move, the row says
+`experts prefer the drop`, or `experts split` when the two ranks are inside
+the experts' own disagreement. If a ranking fails to load, the command says
+which weeks fell back to Sleeper alone.
+
+**The wire is the floor.** In the imminent week an empty slot scores zero:
+filling it is the decision. In later weeks every slot is floored at 85% of the
+third-best free agent at the position that week, because you can sign one
+when the week comes. A backup is worth only his margin over that player, and
+so is a fill-in signed early. **Adds** and **Drop costs** are both measured
+above this floor.
+
+**Depth is priced by simulation.** The weeks after this one are played out
+1000 times:
+
+- Players miss games. A running back who played misses his next game 4% of
+  the time and stays out five weeks on average. A player who carries a
+  designation today starts hurt: ruled Out, he misses the following week half
+  the time.
+- Part of an absent player's projection passes to his healthy teammates at the
+  same position: 85% of a running back's, 62% of a receiver's. This is what a
+  handcuff is worth.
+- Every projection moves. Part of the move stays (a job won or lost) and part
+  belongs to one week (a matchup). After eight weeks a running back's number
+  is typically a third higher or lower than today's.
+
+Each week's lineup is seated on what you would know by then. Every roster
+meets the same injuries in the same runs, so the difference between two
+rosters is far steadier than either total. The hazard, absence, transfer and
+drift numbers are fitted to 2024 and 2025 by `tests/calibrate_weekly.py`. The
+same script shows weekly projections need no shrinkage: the slope of actual on
+projected points is between 0.82 and 1.06 at every position.
+
+**A point is worth what its week decides.** The rest of your regular season is
+played out from the league's records, schedule and projected lineups. A
+regular-season week is weighted by how far winning it moves your title odds. A
+playoff week is weighted by the chance you are still playing in it. A team
+already safe gets small weights now and large ones in the playoffs; a first-
+round bye week counts for nothing. The command prints the odds and the
+weights. They average one, so totals still read in points, and they are half
+applied (`PLAYOFF_FOCUS` in `standings.py`). `--equal-weeks` turns them off.
 
 **A move has a date.** Signing in week k changes only weeks k onward, so each
 possible date has its own value. When the player you would drop still earns
-early weeks, a later date is worth more. Whether to wait depends on the wire:
+early weeks, a later date is worth more. Whether to wait is a count:
 
-- If other free agents at his position are within 3 points of him, he is
-  replaceable. Sign him only if now is his best date; otherwise wait.
-- If nobody on the wire is close, sign him now, as long as signing now
-  already clears 3 points. Waiting is how you lose him.
+- the free agents at his position within 3 points of him, against
+- the claims to expect: other teams in your league he would lift by 3 points,
+  plus one if he is among the 25 most added players on Sleeper today.
 
-A tie between dates goes to the later one, so no roster spot is held early for
-nothing.
+More like him than claims: wait for the best date. Otherwise sign him now, as
+long as signing now already clears 3 points. A tie between dates goes to the
+later one, so no roster spot is held early for nothing.
 
-The table shows the arithmetic behind each move. **Adds** is what he scores for
-you if nobody had to go. **Drop costs** is what the dropped player would have
-scored for you. **Net** is the difference, signing today. **Starts** is how
-many weeks he would start, on average. **When** is the verdict: `sign now`,
-or `wait until week N` with what the move is worth then.
+**Claim** shows who else is after him. In a FAAB league it leads with a bid:
+the minimum when he is uncontested, otherwise a share of your remaining
+budget, `gain / (gain + 6 × weeks left)`, capped at half.
 
-A player on IR or taxi is never offered as the drop. Releasing him frees his
-IR or taxi slot, not the active spot a signing needs.
+**The table is alternatives; the headline is a plan.** Each row is scored as
+the only move you make, and several rows may spend the same drop. The lines
+above the table are the sequence: the best move, then the best move for the
+roster that leaves, up to three. Moves within a point of the top one are named
+as too close to separate.
 
-Every week carries expert consensus, not Sleeper alone. The imminent week gets
-the weekly ranking at the same 50/50 weight `lineup` uses. Later weeks get the
-**rest-of-season** ranking at 0.35, because FantasyPros ranks only the next
-week ahead. The lower weight is deliberate: a rest-of-season rank is
-cumulative, so a player who misses three games already ranks below an equal
-player who does not, and the week-by-week seating scores those missed weeks a
-second time by leaving him out of them.
+Three roster facts are checked before any of this:
 
-If a FantasyPros ranking fails to load, the command says which weeks fell back
-to Sleeper projections alone.
+- A player on IR or taxi is never offered as the drop. Releasing him frees his
+  own slot, not the active spot a signing needs.
+- A benched player your league would accept on injured reserve, with a reserve
+  slot open, frees a spot. The command tells you to move him first.
+- A free agent whose game this week has kicked off is valued from next week.
 
 #### `sleeper-fantasy-nfl-engine alerts`
 
@@ -287,6 +321,7 @@ sleeper-fantasy-nfl-engine lineup             # this week's start/sit changes
 sleeper-fantasy-nfl-engine waivers            # sign anyone? drop whom?
 sleeper-fantasy-nfl-engine waivers --weeks 3  # value only the next three weeks
 sleeper-fantasy-nfl-engine waivers -p RB      # only consider running backs
+sleeper-fantasy-nfl-engine waivers --equal-weeks  # ignore the playoff race
 sleeper-fantasy-nfl-engine alerts             # who moved since last time
 ```
 
@@ -595,18 +630,22 @@ Bijan Robinson,RB,318.0,3.4
 
 ## What it does not model
 
-- **In-season additions.** Downside is floored at the waiver wire, but the
-  upside of picking up a breakout is not modelled. Real rosters gain more from
-  waivers than this assumes, which means late-round picks are worth even less
-  than the model already says.
-- **Injuries that have not happened yet.** The rest-of-season horizon behind
-  `waivers` takes every remaining week's projection at face value, so it sees
-  no reason to hold a backup as insurance. It will happily suggest dropping
-  your third running back, because in a season where nobody gets hurt that
-  spot is genuinely idle.
-- **Who else wants the same free agent.** There is no ownership or bid data
-  here, so `waivers` cannot tell you what a claim will cost in FAAB, only
-  what the player is worth to you.
+- **In-season additions, in the draft engine.** Downside is floored at the
+  waiver wire, but the upside of picking up a breakout is not modelled. Real
+  rosters gain more from waivers than this assumes, which means late-round
+  picks are worth even less than the model already says.
+- **Breakouts you could sign later.** `waivers` floors later weeks at today's
+  wire. A stash is credited with all of his chance to win a job, as if
+  nobody could be signed after he does. Some of that chance is available
+  later for a bid, so a pure upside stash is somewhat overvalued.
+- **What your rivals see in a stash.** Another team's demand for a free agent
+  is judged on today's projections, with no simulation. A rival who wants him
+  only as a lottery ticket is not counted; Sleeper's most-added list stands in.
+- **A player Sleeper does not project.** The experts may rank an injured
+  player for his return while Sleeper has no weekly projection for him. With
+  no weeks to scale, `waivers` cannot value him.
+- **The seasons after this one.** `waivers` values the rest of this season. In
+  a keeper or dynasty league it says so and leaves the future to you.
 - **Correlation between players.** Two receivers on one team compete for the
   same targets; their seasons are drawn independently.
 - **Opponent roster needs.** Opponents follow ADP; they do not skip a position
@@ -623,21 +662,25 @@ of 300 ranks the board in about two seconds; below about 200 the ordering
 wobbles between seeds. The default `vona` strategy runs in closed form and is
 effectively instant.
 
-The judgement calls live in five files and are meant to be edited:
+The judgement calls live in six files and are meant to be edited:
 `valuation.py` holds bench factors, injury discounts (season-long and
 weekly) and the hindsight blend; `simulate.py` holds how far ADP spreads
 around its mean; `outcomes.py` holds the spread constants behind every floor
 and ceiling; `changes.py` holds how far a projection has to move before
-`alerts` flags it; `waivers.py` holds how much a move has to be worth before
-it is worth making, and how few weeks a player can start in before he counts
-as a streamer rather than an upgrade. The `outcomes.py` constants are
-judgement, not fitted to data - they are the least certain numbers in the
-project.
+`alerts` flags it; `waivers.py` holds how much a move has to be worth, what
+the wire is worth in a later week, how fast an injury designation fades and
+how a bid is sized; `standings.py` holds how far a week's weight leans towards
+title odds. The `outcomes.py` constants are judgement, not fitted to data -
+they are the least certain numbers in the project. The injury, transfer and
+drift numbers in `waivers.py` are the opposite: fitted, and not for editing by
+hand.
 
 ## Data sources
 
 - **Sleeper** for the league, the live draft, live rosters, projected stat
-  lines (season-long and per week) and ADP. No authentication needed. The
+  lines (season-long and per week) and ADP. `waivers` also reads the league's
+  standings and schedule, the NFL schedule's game status, and the list of
+  players most added across Sleeper. No authentication needed. The
   draft and its picks are fetched past Sleeper's CDN
   with a unique query parameter. Those two endpoints are served `public,
   s-maxage=..., stale-while-revalidate=300`, so a plain request in the seconds
@@ -704,3 +747,12 @@ PYTHONPATH=tests .venv/bin/python tests/calibrate.py
 Re-derives the spread and shrinkage constants from finished seasons. Add
 `--sweep` to re-fit the waiver depth and bench factor constants too, which
 replays 60 drafts per configuration and is slow.
+
+```bash
+PYTHONPATH=tests .venv/bin/python tests/calibrate_weekly.py
+```
+
+Re-derives the constants behind `waivers` from finished seasons' weekly
+projections and results: how much of a weekly projection to believe, how often
+a player misses his next game and for how long, how much of his work his
+position-mates inherit, and how far a projection drifts.

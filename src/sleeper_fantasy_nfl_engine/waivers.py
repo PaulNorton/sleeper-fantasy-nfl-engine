@@ -60,13 +60,24 @@ he scores in the runs where he is needed. That is the cost of dropping him, and
 a signing has to beat it. Every roster is scored on the same runs, so the gap
 between two rosters carries far less noise than either total.
 
+**A point is worth what its week decides.** A week whose game cannot change
+where you finish counts for less than a playoff week you are sure to play.
+`standings.week_weights` supplies a weight per week and every value here is
+multiplied by it.
+
 **A move has a date as well as a value.** Signing a player in week k changes
 only weeks k onward, so the value of every possible signing date falls out of
 the week-by-week gain. When the drop is still earning early weeks for you,
 signing later is worth more. Whether to wait depends on whether the player
-will still be there. If the wire holds other players about as good, waiting
-costs nothing. If he is the only one, waiting risks losing him, so sign now if
-the move pays even with the early weeks it gives up.
+will still be there. That is a count: the free agents about as good as him,
+against the claims to expect - the other teams he would help, and one more if
+all of Sleeper is adding him. If the wire holds more like him than there are
+claims, waiting costs nothing. If not, waiting risks losing him, so sign now
+if the move pays even with the early weeks it gives up.
+
+**Rows are alternatives; the plan is a sequence.** `best_moves` scores each
+signing as the only move you make. `plan_moves` makes the best one, ranks the
+roster it leaves, and repeats.
 """
 
 from __future__ import annotations

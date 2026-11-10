@@ -22,15 +22,22 @@ PYTHONPATH=tests .venv/bin/python tests/test_season.py
 `test_engine.py` runs the draft-time engine against live projections and
 synthetic drafts. `test_season.py` covers the in-season tools - lineup,
 waivers, drops, alerts - the same way. Both hit the network (Sleeper and
-FantasyPros, both cached) and take a few minutes. Every check must pass
+FantasyPros, both cached) and take under a minute. Every check must pass
 before committing.
+
+Both run on live data, so a check can break with no code change: a player
+Sleeper renames, a ranking page that changes shape. Fix the check or the
+loader before anything else.
+
+`tests/calibrate_weekly.py` is not a check. It re-fits the waiver simulation's
+constants against finished seasons; run it when a season ends.
 
 ## What matters here
 
 The analytics are the product. The UI is deliberately plain. When choosing
 between a clearer number and a nicer display, pick the number.
 
-Three files hold judgement calls rather than derived facts. Changing them
+Six files hold judgement calls rather than derived facts. Changing them
 changes every recommendation, so they are commented and grouped:
 
 - `outcomes.py` - spread constants behind every floor and ceiling. These are
@@ -38,10 +45,13 @@ changes every recommendation, so they are commented and grouped:
 - `valuation.py` - bench factors, injury discounts, the hindsight blend.
 - `simulate.py` - how far actual draft position spreads around ADP.
 - `changes.py` - how far a projection has to move before `alerts` flags it.
-- `waivers.py` - what a move has to be worth before it is worth making, and
-  the injury and drift model that prices bench depth: how often players get
-  hurt, for how long, how much of the work a teammate inherits, and how far a
-  projection wanders.
+- `waivers.py` - what a move has to be worth before it is worth making, what
+  the wire is worth in a later week (`STREAM_RANK`, `STREAM_SHARE`), how fast
+  an injury designation fades (`STATUS_LINGER`), what counts as a contested
+  free agent, and the FAAB bid. The injury, transfer and drift numbers in the
+  same file are fitted, by `tests/calibrate_weekly.py`; do not hand-tune them.
+- `standings.py` - `PLAYOFF_FOCUS`, how far a week's weight leans towards
+  title odds rather than counting every point the same.
 - `projections.py` - the three consensus weights (draft, weekly, rest of
   season). How much of every ordering comes from the experts rather than
   from Sleeper.
@@ -86,3 +96,20 @@ changes every recommendation, so they are commented and grouped:
 - **In-season value is rest-of-season value.** A season-long projection counts
   games already played, so it is the wrong number for any decision taken after
   week 1. Sum the remaining weeks instead.
+- **A rest-of-season rank is a claim about a total.** Blend it against each
+  player's summed remaining weeks, then scale his weeks to match. Blending it
+  into each week separately counts a bye or an absence twice.
+- **A total says little about a weekly level when it covers few weeks.** The
+  rest-of-season adjustment is scaled by the share of his team's remaining
+  games a player is expected to play. Unscaled, a fill-in Sleeper projects for
+  three starts and the experts rank for six became a 25-point quarterback.
+- **Sleeper's weekly projection already leaves out the weeks a player is
+  expected to miss.** A missing week for an injured player is a forecast, not
+  a gap. Discount only the weeks Sleeper still projects.
+- **`gms_active` is set on stat lines for players on injured reserve.** Use
+  `gp` to tell whether a player played.
+- **Every unfilled slot in a later week is worth the wire, not zero.** Only
+  the imminent week scores an empty slot at zero. A zero floor everywhere
+  prices a backup kicker at his whole season.
+- **`waivers` builds its pool from weekly projections.** The season
+  projections miss anyone who earned a role after they were written.

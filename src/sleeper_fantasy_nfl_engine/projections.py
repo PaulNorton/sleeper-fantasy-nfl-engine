@@ -296,12 +296,12 @@ def load_week_points(
     player who is ruled out his near-zero and then pass it to whoever the blend
     happens to seat last.
 
-    `status_discount` decides how hard an injury designation is applied, and
-    which one to pass depends on how far off the week is. For the week about to
-    be played, `weekly_injury_multiplier` is right: "Out" means he does not
-    play that game. For weeks further out, pass `injury_multiplier` instead -
-    today's Questionable tag says little about week 14, and treating it as
-    though it does would write off a healthy player for the rest of the season.
+    `status_discount` decides how hard an injury designation is applied. For
+    the week about to be played, `weekly_injury_multiplier` is right: "Out"
+    means he does not play that game. It is wrong for a week further out -
+    today's Questionable tag says little about week 14. `waivers.load_horizon`
+    loads later weeks with no discount at all and applies its own, which fades
+    week by week.
     """
     scoring = league.scoring_settings
     fmt = league.scoring_format
