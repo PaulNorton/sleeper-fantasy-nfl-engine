@@ -45,7 +45,8 @@ world a backup is seated only on byes, and dropping him costs almost nothing.
 The real season is not like that: starters get hurt, and roles change. So the
 weeks after the imminent one are played out `SIMS` times. In each run a player
 can get hurt and miss weeks, part of an injured player's work passes to his
-teammates at the same position, and every projection drifts week by week. The
+teammates at the same position, and every projection moves: part of the move
+stays for the rest of the season and part belongs to that week alone. The
 lineup is seated each week on what you would know by then. A backup earns what
 he scores in the runs where he is needed. That is the cost of dropping him, and
 a signing has to beat it. Every roster is scored on the same runs, so the gap
@@ -111,17 +112,27 @@ DROP_SHORTLIST = 6
 SIMS = 1000
 SCREEN_SIMS = 200
 
-# The injury model. Judgement calls, not fitted to data; they are meant to land
-# near the games a fantasy-relevant player misses in a typical season.
+# The injury model. Fitted to 2024 and 2025 by `tests/calibrate_weekly.py`,
+# over players projected to matter in the week before.
 #
-# INJURY_HAZARD is the chance a healthy player is hurt in any one week.
-# INJURY_PERSISTENCE is the chance an injured player is still out the week
-# after, so the average absence is 1 / (1 - 0.65), about three weeks. Together,
-# once the season has run a while, they keep a running back out of about 16% of weeks (2.7 games in 17), a
-# receiver or tight end 12% (2.1), a quarterback 9% (1.5). Kickers and
-# defences do not get hurt in this model.
-INJURY_HAZARD = {"QB": 0.035, "RB": 0.065, "WR": 0.05, "TE": 0.05}
-INJURY_PERSISTENCE = 0.65
+# INJURY_HAZARD is the chance a player who played misses his team's next game.
+# INJURY_PERSISTENCE is the chance a player who missed misses again, so the
+# average absence is 1 / (1 - persistence): five weeks for a running back.
+#
+#   pos   hazard  persistence  weeks out, once it settles
+#   QB    0.049   0.75         16%
+#   RB    0.040   0.80         17%
+#   WR    0.048   0.76         17%
+#   TE    0.043   0.72         13%
+#   K     0.037   0.89         24%
+#
+# These count every missed game, whatever the reason: an injury, a benching, a
+# kicker who is cut. A kicker rarely gets hurt but often loses the job, and
+# then he does not come back. Defences do not miss games. A player who is
+# healthy today starts healthy, so over an eight-week horizon he misses fewer
+# weeks than the settled share.
+INJURY_HAZARD = {"QB": 0.049, "RB": 0.040, "WR": 0.048, "TE": 0.043, "K": 0.037}
+INJURY_PERSISTENCE = {"QB": 0.75, "RB": 0.80, "WR": 0.76, "TE": 0.72, "K": 0.89}
 
 # How a designation carried today plays out in later weeks. Judgement calls.
 #
@@ -146,17 +157,31 @@ ROS_FACTOR_LIMIT = 2.0
 
 # Share of an injured player's projection that passes to healthy teammates at
 # his position, split in proportion to their own projections. This is what
-# makes a handcuff worth holding. A backup quarterback inherits most of the
-# job; a receiver's targets scatter across the whole offence.
-INJURY_TRANSFER = {"QB": 0.8, "RB": 0.6, "WR": 0.3, "TE": 0.5}
+# makes a handcuff worth holding. Fitted alongside the hazard: the median rise
+# in his position-mates' combined projection the week he first misses, as a
+# share of his own the week before.
+INJURY_TRANSFER = {"QB": 0.81, "RB": 0.85, "WR": 0.62, "TE": 0.49}
 
-# How far a player's projection wanders per week, on a log scale. The spread
-# grows with the square root of the weeks ahead, like a random walk, but a
-# player's direction is drawn once per run and kept: a job won or lost tends
-# to stay won or lost. After nine weeks a receiver's projection is typically
-# about a third higher or lower than today's. This is the "fluctuation" that
-# depth also covers - a starter who loses his job, a backup who wins one.
-PROJECTION_DRIFT = {"QB": 0.07, "RB": 0.11, "WR": 0.11, "TE": 0.10, "K": 0.06, "DEF": 0.08}
+# How far a player's projection wanders, on a log scale. Fitted on the same
+# two seasons, as the spread between the projection for one week and the
+# projection for a week k later, for players with the same relevant
+# position-mates in both. The variance splits into two parts.
+#
+# PROJECTION_DRIFT is the part that stays: a job won or lost. It grows with
+# the square root of the weeks ahead, and a player's direction is drawn once
+# per run and kept. After eight weeks a running back's projection is typically
+# about a third higher or lower than today's.
+#
+# PROJECTION_NOISE is the part that belongs to one week alone: a matchup, a
+# game plan. It is drawn fresh each week. It is why a bench player close to
+# your starter is worth something even if nobody gets hurt: some weeks he is
+# the better play, and you will know it by then.
+#
+# A defence is nearly all noise and a quarterback is mostly drift. Sleeper's
+# number for a later week may already hold some of that week's matchup, so the
+# noise is, if anything, slightly overstated.
+PROJECTION_DRIFT = {"QB": 0.057, "RB": 0.110, "WR": 0.062, "TE": 0.081, "K": 0.014, "DEF": 0.008}
+PROJECTION_NOISE = {"QB": 0.053, "RB": 0.077, "WR": 0.101, "TE": 0.128, "K": 0.047, "DEF": 0.107}
 
 
 @dataclass
@@ -515,7 +540,9 @@ def simulate(
         for c, (pos, _team) in enumerate(info):
             rng = rngs[c]
             drift = PROJECTION_DRIFT.get(pos, 0.0)
+            noise = PROJECTION_NOISE.get(pos, 0.0)
             hazard = INJURY_HAZARD.get(pos, 0.0)
+            persistence = INJURY_PERSISTENCE.get(pos, 0.0)
             z = rng.gauss(0.0, 1.0) if drift else 0.0
             out = [False] * len(later)
             week = 0
@@ -528,7 +555,7 @@ def simulate(
             if hazard:
                 week += _geometric(rng, hazard)
                 while week < len(later):
-                    length = 1 + _geometric(rng, 1.0 - INJURY_PERSISTENCE)
+                    length = 1 + _geometric(rng, 1.0 - persistence)
                     for k in range(week, min(len(later), week + length)):
                         out[k] = True
                     week += length + _geometric(rng, hazard)
@@ -536,8 +563,10 @@ def simulate(
                 b = base[k][c]
                 if b is None:
                     continue                  # a bye: no game to miss
+                e = rng.gauss(0.0, noise) if noise else 0.0
                 # Centred so the average run keeps today's projection.
-                rows[k][c] = b * math.exp(drift * root * z - 0.5 * drift * drift * root * root)
+                spread = drift * drift * root * root + noise * noise
+                rows[k][c] = b * math.exp(drift * root * z + e - 0.5 * spread)
                 if out[k]:
                     hurt[k].append(c)
 

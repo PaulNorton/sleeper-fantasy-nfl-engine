@@ -349,8 +349,14 @@ print(f"PASS: a backup who covers injuries costs {priced.drop_cost:.1f} points t
 # is what makes two rosters comparable run by run.
 out_weeks = sum(1 for run in runs.points for row in run[1:] if row[runs.index["rb1"]] == 0.0)
 share = out_weeks / (len(runs.points) * (len(depth_weeks) - 1))
-expected = INJURY_HAZARD["RB"] / (INJURY_HAZARD["RB"] + 1 - INJURY_PERSISTENCE)
-assert abs(share - expected) < 0.03, (share, expected)
+# He starts healthy, so the share climbs towards its settled level week by
+# week instead of starting there.
+hazard, persistence = INJURY_HAZARD["RB"], INJURY_PERSISTENCE["RB"]
+p_out, expected = 0.0, 0.0
+for _ in depth_weeks[1:]:
+    p_out = p_out * persistence + (1 - p_out) * hazard
+    expected += p_out / (len(depth_weeks) - 1)
+assert abs(share - expected) < 0.02, (share, expected)
 narrow = simulate(depth, {"rb1"}, sims=50)
 assert all(a[narrow.index["rb1"]] == b[runs.index["rb1"]]
            for ra, rb in zip(narrow.points, runs.points) for a, b in zip(ra, rb))
