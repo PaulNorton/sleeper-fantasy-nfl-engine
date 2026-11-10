@@ -29,12 +29,16 @@ from sleeper_fantasy_nfl_engine.waivers import (
     INJURY_HAZARD,
     INJURY_PERSISTENCE,
     ROS_FACTOR_LIMIT,
+    STREAM_SHARE,
     WORTH_DOING,
+    Runs,
+    _Lineups,
     availability,
     load_horizon,
     remaining_weeks,
     shortlist_free_agents,
     simulate,
+    stream_floors,
 )
 from harness import make_league
 
@@ -362,6 +366,37 @@ assert all(a[narrow.index["rb1"]] == b[runs.index["rb1"]]
            for ra, rb in zip(narrow.points, runs.points) for a, b in zip(ra, rb))
 print(f"PASS: running backs miss {share:.0%} of weeks, and the draws do not depend on "
       f"who else is simulated")
+
+# 9d - the wire is still there later. A backup quarterback who covers one bye
+# costs his whole week to drop if the slot would otherwise sit empty. It would
+# not: three free agents nearly as good will be on the wire that week, so he
+# is worth only his margin over one of them. The imminent week has no floor,
+# because signing somebody for it is the decision.
+one_qb = make_league(positions=["QB", "BN"])
+qb1, qb2, tight = mk("qb1", "QB", 0.0), mk("qb2", "QB", 0.0), mk("te1", "TE", 0.0)
+wire_qbs = [mk(f"wire_qb{i}", "QB", 0.0) for i in range(3)]
+cover = Horizon(weeks=[1, 2, 3], points={
+    1: {"qb1": 20.0, "qb2": 15.0, "te1": 6.0, **{q.name: 14.0 for q in wire_qbs}},
+    2: {"qb2": 15.0, "te1": 6.0, **{q.name: 14.0 for q in wire_qbs}},        # qb1 on bye
+    3: {"qb1": 20.0, "qb2": 15.0, "te1": 6.0, **{q.name: 14.0 for q in wire_qbs}},
+})
+floors = stream_floors(cover, wire_qbs + [tight])
+assert 1 not in floors and abs(floors[2]["QB"] - STREAM_SHARE * 14.0) < 1e-9, floors
+bare = best_moves(one_qb, cover, [qb1, qb2], [tight], limit=5)
+assert not bare, "with no floor the backup's bye week outweighs anything on the wire"
+floored = _Lineups(LineupEvaluator.from_league(one_qb, {}),
+                   Runs.single(cover, {"qb1", "qb2"}), [qb1, qb2], floors)
+cost = -sum(floored.drop(qb2))
+assert abs(cost - (15.0 - STREAM_SHARE * 14.0)) < 1e-9, cost
+# And a fill-in signed two weeks early is worth his margin, not his week.
+early = best_moves(one_qb, cover, [qb1, tight], wire_qbs[:1], limit=5, floors=floors)
+assert not early, early
+late = Horizon(weeks=[2, 3], points={wk: cover.points[wk] for wk in (2, 3)})
+due = best_moves(one_qb, late, [qb1, tight], wire_qbs[:1], limit=5,
+                 floors=stream_floors(late, wire_qbs + [tight]))
+assert due and due[0].act_now and abs(due[0].gain - 14.0) < 1e-9, due
+print(f"PASS: with the wire as a floor a bye-week backup costs {cost:.1f} to drop, not 15.0, "
+      f"and a fill-in is signed the week he is needed")
 
 # 10 - shortlisting keeps the best of every position, not just the best overall.
 many = [mk(f"wr{i}", "WR", 0.0) for i in range(30)] + [mk("lone_te", "TE", 0.0)]

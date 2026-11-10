@@ -35,6 +35,7 @@ from .waivers import (
     remaining_weeks,
     shortlist_free_agents,
     simulate,
+    stream_floors,
 )
 
 app = typer.Typer(add_completion=False, help="Draft assistant for Sleeper leagues.")
@@ -553,6 +554,7 @@ def waivers(
             roster = [horizon.players.get(pid) or sess.players.get(pid) for pid in mine]
             roster = [p for p in roster if p is not None]
             pool = [p for pid, p in horizon.players.items() if pid not in taken]
+            floors = stream_floors(horizon, pool)
             if position:
                 pool = [p for p in pool if p.position == position.upper()]
             pool = shortlist_free_agents(horizon, pool)
@@ -561,7 +563,7 @@ def waivers(
             spare = open_roster_spots(sess.league, row)
             moves = best_moves(sess.league, horizon, roster, pool,
                                spare_spots=spare, limit=limit,
-                               droppable=droppable_ids(row), runs=runs)
+                               droppable=droppable_ids(row), runs=runs, floors=floors)
 
         # A failed FantasyPros fetch must not pass Sleeper's numbers off as
         # the blend. The two rankings fail separately, so say which weeks.

@@ -21,17 +21,25 @@ approximate falls out of that for free:
     that are over. Only the weeks ahead of you can still be influenced by a
     move, so only those are summed.
 
-An empty starter slot scores **zero** here, not replacement level, which is the
-one place this model deliberately parts company with the draft engine. The
+An empty starter slot in the **imminent week** scores zero, not replacement
+level, which is where this model parts company with the draft engine. The
 draft engine floors every slot at the waiver wire because it knows you will
-stream someone eventually; that assumption is exactly what is being decided
-now, so assuming it would score every pickup at nothing. Within one real week,
-an unfilled slot scores what an unfilled slot scores.
+stream someone eventually; for this week that is exactly what is being decided
+now, so assuming it would score every pickup at nothing.
+
+In the **weeks after it** every slot is floored at what the wire will still
+offer: a share of the third-best free agent at the position that week - see
+`stream_floors`. You do not have to hold a backup kicker through November to
+cover one bye; you can sign one that week. Without the floor the model
+charged the whole of a backup's points for dropping him, and credited the
+whole of a fill-in's points for signing him weeks early. With it, each is
+worth only his margin over the player you could pick up when the week comes.
 
 Weekly projections are used unshrunk. `projections.SHRINKAGE` was fitted on
-season-long projections against season-long results, and there is no
-equivalent measurement for a single week; applying it here would be an
-unvalidated transform dressed up as a correction.
+season-long projections against season-long results. The same measurement for
+single weeks (`tests/calibrate_weekly.py`, 2024 and 2025) puts the slope of
+actual on projected points between 0.82 and 1.06 at every position, kickers
+and defences included: a weekly projection's spread is small, and it is real.
 
 Expert consensus is blended in, though, because that is a second opinion
 rather than a transform. FantasyPros publishes a weekly ranking for the next
@@ -98,6 +106,18 @@ WORTH_DOING = 3.0
 # cost of signing now. Below this the gap is inside the simulation's noise.
 TIMING_SLACK = 1.0
 
+# What the wire is worth in a later week. Judgement calls.
+#
+# A slot you cannot fill from your roster is filled from the wire, by the
+# STREAM_RANK-th best free agent at the position that week, at STREAM_SHARE of
+# his projection. Third, not first: by the time the week comes the best one or
+# two are often gone. The share pays for what streaming costs and the model
+# cannot see: the player you cut to make room, the waiver claim that fails.
+# Measured on today's wire, which is a low estimate of a later one - players
+# break out, and some of them will still be free.
+STREAM_RANK = 3
+STREAM_SHARE = 0.85
+
 # How many candidates survive the cheap first pass into the exact pairwise one.
 # The shortlists only need to be wide enough to contain the real answer; every
 # pair beyond that is arithmetic nobody reads.
@@ -148,11 +168,15 @@ STATUS_LINGER = {"IR": 0.85, "PUP": 0.85, "NA": 0.8, "Sus": 0.8}
 DEFAULT_LINGER = 0.5
 
 # How far the rest-of-season blend may move a player's weeks, up or down. The
-# blend sets his total and Sleeper's weeks carry it. When Sleeper projects a
-# player for one week of the eight and the experts rank him as if he will play
-# several, the whole difference would land on that one week: a quarterback
-# projected for 2 points was handed 44. The experts may double Sleeper's
-# number or halve it, and no more.
+# blend sets his total and Sleeper's weeks carry it, so the experts may double
+# Sleeper's number or halve it, and no more.
+#
+# The move is also scaled by how much of the remaining schedule Sleeper
+# expects him to play - see `load_horizon`. A total says less about a weekly
+# level the fewer weeks it covers. When Sleeper projects a fill-in quarterback
+# for three starts and the experts rank him as if he gets six, the difference
+# is starts, not points per start, and loading it onto the three starts made
+# him a 25-point quarterback.
 ROS_FACTOR_LIMIT = 2.0
 
 # Share of an injured player's projection that passes to healthy teammates at
@@ -356,7 +380,8 @@ def load_horizon(
     Sleeper's order and the experts'. Each of his weeks is then scaled by the
     same factor, so his total matches the blended one. Sleeper keeps the
     shape: byes, matchups and expected return dates. The experts move the
-    level, within `ROS_FACTOR_LIMIT`. The total always spans the rest of the season, whatever `weeks`
+    level, within `ROS_FACTOR_LIMIT` and in proportion to how much of the
+    remaining schedule he is expected to play. The total always spans the rest of the season, whatever `weeks`
     asks for, because that is what the experts ranked.
 
     Blending week by week instead would count an absence twice: the experts
@@ -421,11 +446,19 @@ def load_horizon(
              for pid, pts in total.items() if pts > 0]
     if ros_rows:
         blend_ranks(seats, ros_rows, ROS_CONSENSUS_WEIGHT, unranked_last=True)
-    factor = {
-        p.player_id: min(ROS_FACTOR_LIMIT,
-                         max(1.0 / ROS_FACTOR_LIMIT, p.points / total[p.player_id]))
-        for p in seats
-    }
+    # Expected games, as a share of the games his team has left.
+    games: dict[str, float] = {}
+    team_weeks: dict[str | None, set[int]] = {}
+    for week in season_weeks:
+        for p in raw[week]:
+            games[p.player_id] = games.get(p.player_id, 0.0) + plays(p.player_id, week)
+            team_weeks.setdefault(p.team, set()).add(week)
+    factor: dict[str, float] = {}
+    for p in seats:
+        moved = min(ROS_FACTOR_LIMIT, max(1.0 / ROS_FACTOR_LIMIT, p.points / total[p.player_id]))
+        left = len(team_weeks.get(p.team) or season_weeks) if p.team else len(season_weeks)
+        share = min(1.0, games.get(p.player_id, 0.0) / max(1, left))
+        factor[p.player_id] = 1.0 + (moved - 1.0) * share
 
     healthy: dict[int, dict[str, float]] = {}
     points: dict[int, dict[str, float]] = {}
@@ -654,6 +687,29 @@ def droppable_ids(roster_row: dict | None) -> set[str]:
     return {str(pid) for pid in (roster_row.get("players") or []) if str(pid) not in parked}
 
 
+def stream_floors(
+    horizon: Horizon, free_agents: list[Player]
+) -> dict[int, dict[str, float]]:
+    """week -> position -> what a slot is worth filled from the wire that week.
+
+    Every week after the imminent one. The imminent week has no floor: whether
+    to sign somebody for it is the decision being made. `free_agents` is the
+    whole wire, not a shortlist and not one position.
+    """
+    floors: dict[int, dict[str, float]] = {}
+    for week in horizon.weeks[1:]:
+        by_pos: dict[str, list[float]] = {}
+        for fa in free_agents:
+            pts = horizon.week_points(week, fa)
+            if pts > 0:
+                by_pos.setdefault(fa.position, []).append(pts)
+        floors[week] = {
+            pos: STREAM_SHARE * sorted(pts, reverse=True)[min(STREAM_RANK, len(pts)) - 1]
+            for pos, pts in by_pos.items()
+        }
+    return floors
+
+
 def shortlist_free_agents(
     horizon: Horizon, free_agents: list[Player], per_position: int = 25
 ) -> list[Player]:
@@ -689,10 +745,21 @@ class _Lineups:
     displace, directly or by a flex slot shuffling, cannot improve the lineup.
     """
 
-    def __init__(self, evaluator: LineupEvaluator, runs: Runs, roster: list[Player]):
+    def __init__(
+        self,
+        evaluator: LineupEvaluator,
+        runs: Runs,
+        roster: list[Player],
+        floors: dict[int, dict[str, float]] | None = None,
+    ):
         self.evaluator = evaluator
         self.runs = runs
         self.n_weeks = len(runs.weeks)
+        # One evaluator per week: each week has its own floor under every
+        # slot, and the imminent week has none.
+        self.evaluators = [
+            replace(evaluator, replacement=(floors or {}).get(wk, {})) for wk in runs.weeks
+        ]
 
         # Positions linked by a flex slot, directly or through a chain of them,
         # and the starter slots only that group can fill.
@@ -724,11 +791,16 @@ class _Lineups:
                         by_pos.setdefault(pos, []).append((v, v, pid))
                 for lst in by_pos.values():
                     lst.sort(key=_neg_points)
-                self.cells.append(self._cell(by_pos))
+                self.cells.append(self._cell(by_pos, self.evaluators[len(self.cells) % self.n_weeks]))
 
-    def _cell(self, by_pos: dict) -> tuple:
-        """(pools, lineup total, who starts, the bar a newcomer must clear)."""
-        total, used = self.evaluator.seat(by_pos)
+    def _cell(self, by_pos: dict, evaluator: LineupEvaluator) -> tuple:
+        """(pools, lineup total, who starts, the bar a newcomer must clear, evaluator).
+
+        The bar ignores the week's floor. A newcomer who clears it is seated
+        again and scored exactly, floor included; one who does not would not
+        have been seated, floor or no floor.
+        """
+        total, used = evaluator.seat(by_pos)
         seated: set[str] = set()
         lowest: dict[str, float] = {}
         for pos, lst in by_pos.items():
@@ -743,7 +815,7 @@ class _Lineups:
             bar[group] = (min((lowest[q] for q in group if q in lowest), default=0.0)
                           if filled >= self.slots[group] else 0.0)
         thresholds = {pos: bar[group] for pos, group in self.related.items()}
-        return by_pos, total, seated, thresholds
+        return by_pos, total, seated, thresholds, evaluator
 
     def _pools(self, by_pos: dict, drop: Player | None, add: tuple[str, float, str] | None) -> dict:
         pools = dict(by_pos)
@@ -758,7 +830,7 @@ class _Lineups:
         return pools
 
     def _reseat(self, cell, drop: Player | None, add: tuple[str, float, str] | None) -> float:
-        return self.evaluator.seat(self._pools(cell[0], drop, add))[0] - cell[1]
+        return cell[4].seat(self._pools(cell[0], drop, add))[0] - cell[1]
 
     def _points(self, player: Player) -> list[float]:
         """His points in every cell, in cell order."""
@@ -795,7 +867,7 @@ class _Lineups:
             if not keep:
                 out.append(self._reseat(cell, player, None))
                 continue
-            reduced = self._cell(self._pools(cell[0], player, None))
+            reduced = self._cell(self._pools(cell[0], player, None), cell[4])
             out.append(reduced[1] - cell[1])
             without[i] = reduced
         if keep:
@@ -831,6 +903,7 @@ def best_moves(
     limit: int = 10,
     droppable: set[str] | None = None,
     runs: Runs | None = None,
+    floors: dict[int, dict[str, float]] | None = None,
 ) -> list[Move]:
     """Rank signings by what they add to your rest-of-season total, net of the drop.
 
@@ -846,14 +919,15 @@ def best_moves(
 
     `droppable` limits who can pay for a signing - see `droppable_ids`. None
     means anyone on the roster.
+
+    `floors` are the wire's worth in each later week, from `stream_floors`.
+    Without them an unfilled slot scores zero in every week.
     """
-    # Every week is seated with its own evaluator, and every slot is floored at
-    # zero rather than at replacement - see the module docstring.
     evaluator = LineupEvaluator.from_league(league, {})
     if runs is None:
         runs = Runs.single(horizon, {p.player_id for p in roster + free_agents})
     first_week = horizon.weeks[0] if horizon.weeks else 0
-    lineups = _Lineups(evaluator, runs, roster)
+    lineups = _Lineups(evaluator, runs, roster, floors)
     n_runs = len(runs.points)
 
     screened = [(sum(lineups.add(fa, SCREEN_SIMS)), fa) for fa in free_agents]
