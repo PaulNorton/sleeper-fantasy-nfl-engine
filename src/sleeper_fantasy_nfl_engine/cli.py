@@ -28,11 +28,15 @@ from .sleeper import SleeperClient, SleeperError, clear_cache
 from .standings import flat as flat_weeks, league_leverage
 from .waivers import (
     SIMS,
+    TIMING_SLACK,
     WORTH_DOING,
-    best_moves,
+    bench_locked,
     droppable_ids,
+    ir_moves,
     load_horizon,
+    locked_teams,
     open_roster_spots,
+    plan_moves,
     remaining_weeks,
     shortlist_free_agents,
     simulate,
@@ -530,9 +534,10 @@ def waivers(
     """Decide whether to sign anyone today, and who to drop to make room.
 
     A signing is recommended only if it raises your rest-of-season total after
-    paying for the drop, and only if today is the time to make it. The drop is
-    priced by simulating injuries and changing roles, so a backup who covers
-    for your starters is not given away for nothing.
+    paying for the drop, and only if today is the time to make it. Values come
+    from Sleeper's weekly projections blended with FantasyPros' rankings for
+    this week and the rest of the season, played out over simulated seasons
+    with injuries and changing roles, and weighted by what each week decides.
     """
     with SleeperClient() as client:
         sess = _season_session(client, username, league_id, season, roster_id,
@@ -559,13 +564,20 @@ def waivers(
             mine = [str(pid) for pid in (row.get("players") or [])]
             roster = [horizon.players.get(pid) or sess.players.get(pid) for pid in mine]
             roster = [p for p in roster if p is not None]
-            pool = [p for pid, p in horizon.players.items() if pid not in taken]
-            floors = stream_floors(horizon, pool)
+            wire = [p for pid, p in horizon.players.items() if pid not in taken]
+            # A free agent whose game has kicked off cannot help this week.
+            try:
+                locked = bench_locked(
+                    horizon, wire, locked_teams(client, sess.season, horizon_weeks[0]))
+            except SleeperError:
+                locked = 0
+            floors = stream_floors(horizon, wire)
             leverage = (
                 flat_weeks(horizon_weeks) if equal_weeks
                 else league_leverage(client, sess.league, sess.rosters,
                                      sess.my_roster_id, horizon)
             )
+            pool = wire
             if position:
                 pool = [p for p in pool if p.position == position.upper()]
             pool = shortlist_free_agents(horizon, pool)
@@ -583,11 +595,13 @@ def waivers(
                 trending = {}
         with console.status(f"simulating {sims} seasons…"):
             runs = simulate(horizon, {p.player_id for p in roster + pool}, sims)
-            spare = open_roster_spots(sess.league, row)
-            moves = best_moves(sess.league, horizon, roster, pool,
-                               spare_spots=spare, limit=limit,
-                               droppable=droppable_ids(row), runs=runs, floors=floors,
-                               weights=leverage.weights, rivals=rivals, trending=trending)
+            to_ir = ir_moves(sess.league, row, horizon.status)
+            spare = open_roster_spots(sess.league, row) + len(to_ir)
+            moves, steps = plan_moves(
+                sess.league, horizon, roster, pool, spare_spots=spare, limit=limit,
+                droppable=droppable_ids(row) - set(to_ir), runs=runs, floors=floors,
+                weights=leverage.weights, rivals=rivals, trending=trending,
+            )
 
         # A failed FantasyPros fetch must not pass Sleeper's numbers off as
         # the blend. The two rankings fail separately, so say which weeks.
@@ -598,14 +612,49 @@ def waivers(
             console.print(
                 f"[yellow]No expert consensus for {weeks_text} — Sleeper projections only.[/]"
             )
+        if sess.league.league_type:
+            console.print(
+                "[yellow]Keeper or dynasty league: these values cover this season only.[/]"
+            )
         console.print(ui.week_outlook(sess.league, horizon, roster))
         console.print(ui.leverage_note(leverage))
+        if locked:
+            console.print(
+                f"[dim]{locked} free agents have already played this week; "
+                f"they are valued from week {horizon_weeks[0] + 1}.[/]"
+            )
+        for pid in to_ir:
+            name = horizon.players[pid].name if pid in horizon.players else pid
+            console.print(
+                f"[bold]Move {name} to injured reserve first.[/] It frees a roster spot, "
+                f"so a signing needs no drop."
+            )
         console.print()
 
+        # FAAB leagues bid for a claim; the rest go by priority.
+        cfg = sess.league.settings
+        faab = int(cfg.get("waiver_type") or 0) == 2
+        budget = float(cfg.get("waiver_budget") or 0) - float(
+            (row.get("settings") or {}).get("waiver_budget_used") or 0)
+        weeks_left = len(remaining_weeks(current))
+
+        def claim(m) -> str:
+            who = []
+            if m.demand:
+                who.append(f"{m.demand} team{'s' if m.demand > 1 else ''}")
+            if m.trending:
+                who.append(f"#{m.trending} trending")
+            wanted = ", ".join(who) or "uncontested"
+            if not faab:
+                return wanted
+            return f"${m.bid(budget, float(cfg.get('waiver_bid_min') or 0), weeks_left)} · {wanted}"
+
+        def sentence(m) -> str:
+            drop = f", drop {m.drop.label}" if m.drop else " into your open roster spot"
+            return f"Sign {m.add.label}{drop}"
+
         span = f"weeks {horizon_weeks[0]}–{horizon_weeks[-1]}"
-        act_now = [m for m in moves if m.act_now]
-        best = act_now[0] if act_now else None
-        if best is None:
+        if not steps:
             console.print(
                 f"[green]Stand pat.[/] No signing made today adds {WORTH_DOING:.0f} points "
                 f"to your {span} total."
@@ -617,38 +666,67 @@ def waivers(
                     f"like him are worth about {waiting.sign_value:+.1f} then.[/]"
                 )
         else:
+            best = steps[0]
+            cost = ""
             if best.drop:
                 cost = (f" He adds {best.add_value:+.1f}; losing {best.drop.name} "
-                        f"costs {best.drop_cost:.1f} in injury and bye cover.")
-                drop = f", drop {best.drop.label}"
-            else:
-                cost, drop = "", " (you have a spare roster spot)"
+                        f"costs {best.drop_cost:.1f}.")
             console.print(
-                f"[bold]Sign {best.add.label}{drop}.[/] Worth [green]{best.gain:+.1f}[/] "
+                f"[bold]{sentence(best)}.[/] Worth [green]{best.gain:+.1f}[/] "
                 f"points over {span}.{cost}"
             )
+            if best.experts:
+                console.print(
+                    f"[yellow]Check this one: the {best.experts} on rest-of-season rank "
+                    f"({horizon.ranks(best.add)} against {horizon.ranks(best.drop)}).[/]"
+                )
+            # Two seeds can order moves this close either way. Say so, so
+            # the first row is not read as a clear winner.
+            close = [m for m in moves if m.act_now and m is not best
+                     and best.gain - m.gain < TIMING_SLACK]
+            if close:
+                names = ", ".join(f"{m.add.name} ({m.gain:+.1f})" for m in close)
+                console.print(
+                    f"[dim]Too close to separate from: {names}. The simulation does not "
+                    f"split moves under {TIMING_SLACK:.0f} point apart.[/]"
+                )
+            for step in steps[1:]:
+                console.print(f"Then: {sentence(step)}. Worth [green]{step.gain:+.1f}[/] more.")
+            if faab:
+                console.print(f"[dim]${budget:.0f} of your waiver budget is left.[/]")
         if not moves:
             raise typer.Exit(0)
 
+        def cell(player) -> Text:
+            if player is None:
+                return Text("(open spot)", style="dim")
+            text = Text(player.label)
+            text.append(f"\n{horizon.ranks(player)}", style="dim")
+            return text
+
         console.print()
-        table = Table("Sign", "Pos", "Drop", "Adds", "Drop costs", "Net", "Starts", "When",
+        table = Table("Sign", "Drop", "Adds", "Drop costs", "Net", "Starts", "Claim", "When",
                       title=f"{span}, {max(sims, 1)} simulated seasons")
         for m in moves:
+            when = Text(m.reason(), style="" if m.act_now else "dim")
+            if m.experts:
+                when.append(f"\n{m.experts}", style="yellow")
             table.add_row(
-                m.add.label if m.add else "—",
-                m.add.position if m.add else "—",
-                m.drop.label if m.drop else "(spare spot)",
+                cell(m.add), cell(m.drop),
                 f"{m.add_value:+.1f}",
                 f"{-m.drop_cost:+.1f}" if m.drop else "—",
                 f"{m.gain:+.1f}",
                 f"{m.starts:.1f}",
-                Text(m.reason(), style="" if m.act_now else "dim"),
+                claim(m),
+                when,
             )
         console.print(table)
         console.print(Text(
-            "Adds: what he scores for you if nobody had to go. Drop costs: what the "
-            "dropped player would have scored for you covering byes, injuries and "
-            "changed roles. Starts: weeks he would start, on average.",
+            "Each row is scored as the only move you make. Under each name: his "
+            "FantasyPros rank this week and for the rest of the season. Adds: what he "
+            "scores for you above what the wire would give you anyway. Drop costs: the "
+            "same for the player you lose. Starts: weeks he would start, on average. "
+            "Claim: " + ("a bid, and " if faab else "") + "who else is after him.",
             style="dim",
         ))
         if spare:

@@ -103,7 +103,9 @@ SEASON_END_WEEK = 17
 WORTH_DOING = 3.0
 
 # Points a later signing date has to be worth before it is mentioned as the
-# cost of signing now. Below this the gap is inside the simulation's noise.
+# cost of signing now. Below this the gap is inside the simulation's noise:
+# across seeds a move's value shifts by about half a point at 1000 runs. The
+# same slack marks two moves as too close to separate.
 TIMING_SLACK = 1.0
 
 # What the wire is worth in a later week. Judgement calls.
@@ -256,13 +258,14 @@ class Horizon:
         return self.points.get(week, {}).get(player.player_id, 0.0)
 
     def ranks(self, player: Player) -> str:
-        """His FantasyPros ranks, e.g. "wk TE12 · ROS TE15". Empty if unranked."""
-        parts = []
-        if player.player_id in self.week_rank:
-            parts.append(f"wk {player.position}{self.week_rank[player.player_id]}")
-        if player.player_id in self.ros_rank:
-            parts.append(f"ROS {player.position}{self.ros_rank[player.player_id]}")
-        return " · ".join(parts)
+        """His FantasyPros positional ranks, e.g. "TE wk12 ros15".
+
+        This week's, then the rest of the season's. A dash where the experts
+        did not list him.
+        """
+        week = self.week_rank.get(player.player_id)
+        ros = self.ros_rank.get(player.player_id)
+        return f"{player.position} wk{week or '–'} ros{ros or '–'}"
 
 
 @dataclass
@@ -279,6 +282,9 @@ class Move:
     equals: int = 0                          # others on the wire about as good
     demand: int = 0                          # other teams he would help
     trending: int | None = None              # rank among Sleeper's most added, if any
+    # Where the experts' rest-of-season ranking stands on a same-position
+    # swap: "" when it agrees or has no view, else what it says instead.
+    experts: str = ""
 
     @property
     def rivals(self) -> int:
@@ -724,6 +730,69 @@ def droppable_ids(roster_row: dict | None) -> set[str]:
     return {str(pid) for pid in (roster_row.get("players") or []) if str(pid) not in parked}
 
 
+# Designations Sleeper lets a league choose to accept on injured reserve, and
+# the league setting that switches each one on. IR and PUP always qualify.
+IR_SETTING = {
+    "Out": "reserve_allow_out",
+    "Doubtful": "reserve_allow_doubtful",
+    "Sus": "reserve_allow_sus",
+    "NA": "reserve_allow_na",
+    "COV": "reserve_allow_cov",
+    "DNR": "reserve_allow_dnr",
+}
+
+
+def ir_moves(
+    league: LeagueSettings, roster_row: dict | None, status: dict[str, str]
+) -> list[str]:
+    """Players on your active roster who could go to injured reserve today.
+
+    Each one frees an active spot, so a signing needs no drop. Limited to the
+    reserve slots you have open and to the designations this league accepts.
+    """
+    if not roster_row:
+        return []
+    slots = int(league.settings.get("reserve_slots") or 0) or sum(
+        1 for slot in league.roster_positions if slot == "IR"
+    )
+    spare = slots - len(roster_row.get("reserve") or [])
+    if spare <= 0:
+        return []
+    active = droppable_ids(roster_row)
+
+    def eligible(pid: str) -> bool:
+        tag = status.get(pid)
+        return tag in ("IR", "PUP") or bool(tag and league.settings.get(IR_SETTING.get(tag, "")))
+
+    return [str(pid) for pid in (roster_row.get("players") or [])
+            if str(pid) in active and eligible(str(pid))][:spare]
+
+
+def locked_teams(client: SleeperClient, season: str, week: int) -> set[str]:
+    """Teams whose game this week has kicked off or finished."""
+    teams: set[str] = set()
+    for game in client.schedule(season, ttl=900):
+        if str(game.get("week")) == str(week) and game.get("status") not in (None, "pre_game"):
+            teams.update(t for t in (game.get("home"), game.get("away")) if t)
+    return teams
+
+
+def bench_locked(horizon: Horizon, free_agents: list[Player], teams: set[str]) -> int:
+    """Zero the imminent week for free agents whose game has started.
+
+    Signing one of them now cannot put his points in this week's lineup. Your
+    own players are left alone: a starter who has played keeps his slot and
+    his points whatever you do next. Returns how many were zeroed.
+    """
+    if not horizon.weeks or not teams:
+        return 0
+    week = horizon.points.get(horizon.weeks[0], {})
+    hit = [fa for fa in free_agents if fa.team in teams and week.get(fa.player_id)]
+    for fa in hit:
+        week[fa.player_id] = 0.0
+    return len(hit)
+
+
 def stream_floors(
     horizon: Horizon, free_agents: list[Player]
 ) -> dict[int, dict[str, float]]:
@@ -1035,6 +1104,22 @@ def best_moves(
         rank = (trending or {}).get(move.add.player_id)
         move.trending = rank if rank is not None and rank <= TRENDING_TOP else None
 
+    # The experts' view of a same-position swap, from their rest-of-season
+    # ranking. Only a like-for-like swap: a rank against another position's
+    # is two numbers, not a comparison.
+    for move in moves:
+        if move.drop is None or move.drop.position != move.add.position:
+            continue
+        ours = horizon.ros_ecr.get(move.add.player_id)
+        theirs = horizon.ros_ecr.get(move.drop.player_id)
+        if ours is None or theirs is None:
+            continue
+        apart = (ours[1] ** 2 + theirs[1] ** 2) ** 0.5
+        if abs(ours[0] - theirs[0]) < apart:
+            move.experts = "experts split"
+        elif ours[0] > theirs[0]:
+            move.experts = "experts prefer the drop"
+
     # Demand: the other teams he would lift by enough to be worth a claim.
     # Taken at face value, one run and no weights: it only has to say whether
     # a rival has a use for him, not what that use is worth.
@@ -1064,3 +1149,50 @@ def best_moves(
         if len(best_list) >= limit:
             break
     return best_list
+
+
+def plan_moves(
+    league: LeagueSettings,
+    horizon: Horizon,
+    roster: list[Player],
+    free_agents: list[Player],
+    spare_spots: int = 0,
+    limit: int = 10,
+    droppable: set[str] | None = None,
+    max_moves: int = 3,
+    **scoring,
+) -> tuple[list[Move], list[Move]]:
+    """Today's moves ranked, and the sequence worth making: (ranked, steps).
+
+    `ranked` is `best_moves` for your roster as it stands. Its rows are
+    alternatives, not a list to work through: each is scored as the only move
+    you make, and several may spend the same drop. `steps` is the sequence.
+    The best move worth making today is applied, the roster it leaves is
+    ranked again, and so on until nothing clears the bar or `max_moves` is
+    reached. A player signed in one step is never the drop in a later one.
+    """
+    ranked = best_moves(league, horizon, roster, free_agents, spare_spots=spare_spots,
+                        limit=limit, droppable=droppable, **scoring)
+    steps: list[Move] = []
+    current, pool = list(roster), list(free_agents)
+    payable = None if droppable is None else set(droppable)
+    spare, moves = spare_spots, ranked
+    while len(steps) < max_moves:
+        step = next((m for m in moves if m.act_now), None)
+        if step is None:
+            break
+        steps.append(step)
+        signed = step.add.player_id
+        pool = [p for p in pool if p.player_id != signed]
+        if step.drop is None:
+            spare -= 1
+        else:
+            current = [p for p in current if p.player_id != step.drop.player_id]
+        if payable is None:
+            payable = {p.player_id for p in current}
+        payable.discard(signed)
+        current.append(step.add)
+        if len(steps) < max_moves:
+            moves = best_moves(league, horizon, current, pool, spare_spots=max(0, spare),
+                               limit=1, droppable=payable, **scoring)
+    return ranked, steps

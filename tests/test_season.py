@@ -34,6 +34,9 @@ from sleeper_fantasy_nfl_engine.waivers import (
     Runs,
     _Lineups,
     availability,
+    bench_locked,
+    ir_moves,
+    plan_moves,
     load_horizon,
     remaining_weeks,
     shortlist_free_agents,
@@ -481,6 +484,59 @@ stashed = best_moves(two_wr, upgrade_horizon, [wr1, wr2, spare], [plugger], limi
                      droppable={"wr1", "wr2"})
 assert stashed and all(m.drop.player_id != "spare_rb" for m in stashed), stashed
 print("PASS: a player parked on IR is never offered as the drop")
+
+# 11c - an injured player the league lets you stash frees a spot instead.
+# One reserve slot open and a player on IR sitting on the bench: move him and
+# sign without a drop. A player who is only Out qualifies when the league
+# says so, and nobody qualifies with the reserve full.
+stash = make_league(positions=["WR", "WR", "BN", "IR"])
+bench_row = {"players": ["a", "b", "c"], "reserve": []}
+assert ir_moves(stash, bench_row, {"c": "IR"}) == ["c"]
+assert ir_moves(stash, bench_row, {"c": "Out"}) == []
+stash.settings["reserve_allow_out"] = 1
+assert ir_moves(stash, bench_row, {"c": "Out"}) == ["c"]
+assert ir_moves(stash, {"players": ["a", "b", "c"], "reserve": ["b"]}, {"c": "IR"}) == []
+print("PASS: a stashable player on the bench frees a spot when a reserve slot is open")
+
+# 11d - a free agent whose game has kicked off cannot score for you this
+# week, so he is valued from next week. Your own players are left alone.
+kick = Horizon(weeks=[1, 2], points={wk: {"wr1": 18.0, "plugger": 7.0} for wk in (1, 2)})
+late_fa = replace(plugger, team="AAA")
+assert bench_locked(kick, [late_fa], {"AAA"}) == 1
+assert kick.points[1]["plugger"] == 0.0 and kick.points[2]["plugger"] == 7.0, kick.points
+assert kick.points[1]["wr1"] == 18.0
+print("PASS: a free agent who has already played is valued from next week")
+
+# 11e - the plan. Two upgrades on the wire and two weak receivers to cut:
+# each row of the ranking is scored alone, and both would spend the same
+# drop. The plan makes the first move, ranks again, and spends the other.
+# The player signed first is never the drop for the second.
+three_wr = make_league(positions=["WR", "WR", "WR"])
+weak1, weak2 = mk("weak1", "WR", 0.0), mk("weak2", "WR", 0.0)
+star1, star2 = mk("star1", "WR", 0.0), mk("star2", "WR", 0.0)
+plan_h = Horizon(weeks=[1, 2, 3], points={
+    wk: {"wr1": 18.0, "weak1": 5.0, "weak2": 4.0, "star1": 15.0, "star2": 12.0}
+    for wk in (1, 2, 3)
+})
+ranked, steps = plan_moves(three_wr, plan_h, [wr1, weak1, weak2], [star1, star2], limit=5)
+assert {m.drop.player_id for m in ranked} == {"weak2"}, "each row alone spends the cheapest drop"
+assert [(m.add.player_id, m.drop.player_id) for m in steps] == [
+    ("star1", "weak2"), ("star2", "weak1")], steps
+assert abs(steps[0].gain - 3 * (15.0 - 4.0)) < 1e-6, steps[0].gain
+assert abs(steps[1].gain - 3 * (12.0 - 5.0)) < 1e-6, "the second step is scored after the first"
+print("PASS: the plan sequences moves, re-scoring each on the roster the last one left")
+
+# 11f - a same-position swap is checked against the experts' rest-of-season
+# ranking. Agreement says nothing; a rank inside their disagreement, or the
+# other way round, is flagged.
+agree_h = Horizon(weeks=[1, 2, 3], points=upgrade_horizon.points,
+                  ros_ecr={"plugger": (20.0, 3.0), "wr2": (60.0, 5.0)})
+assert best_moves(two_wr, agree_h, [wr1, wr2], [plugger], limit=5)[0].experts == ""
+split_h = replace(agree_h, ros_ecr={"plugger": (40.0, 9.0), "wr2": (44.0, 8.0)})
+assert best_moves(two_wr, split_h, [wr1, wr2], [plugger], limit=5)[0].experts == "experts split"
+against_h = replace(agree_h, ros_ecr={"plugger": (70.0, 3.0), "wr2": (30.0, 4.0)})
+assert "prefer the drop" in best_moves(two_wr, against_h, [wr1, wr2], [plugger], limit=5)[0].experts
+print("PASS: a swap the experts' rest-of-season ranking disputes is flagged")
 
 # 9 - alerts: no snapshot yet means no movers; a big projection swing between
 # two snapshots is flagged, a small one is not.
