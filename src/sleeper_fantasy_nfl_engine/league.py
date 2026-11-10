@@ -43,6 +43,8 @@ class LeagueSettings:
 
     starter_slots: dict[str, int] = field(default_factory=dict)  # incl. flex slot names
     bench_size: int = 0
+    # Sleeper's raw league settings: playoff weeks, waiver budget, IR rules.
+    settings: dict = field(default_factory=dict)
 
     @classmethod
     def from_api(cls, data: dict) -> "LeagueSettings":
@@ -56,6 +58,7 @@ class LeagueSettings:
             roster_positions=positions,
             scoring_settings={k: float(v) for k, v in (data.get("scoring_settings") or {}).items()},
             league_type=int(settings.get("type", 0) or 0),
+            settings=dict(settings),
         )
         counts: dict[str, int] = {}
         bench = 0

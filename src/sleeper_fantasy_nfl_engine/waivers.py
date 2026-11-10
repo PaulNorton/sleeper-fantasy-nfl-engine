@@ -751,10 +751,14 @@ class _Lineups:
         runs: Runs,
         roster: list[Player],
         floors: dict[int, dict[str, float]] | None = None,
+        weights: dict[int, float] | None = None,
     ):
         self.evaluator = evaluator
         self.runs = runs
         self.n_weeks = len(runs.weeks)
+        # What a point is worth in each week - see `standings`. Every change
+        # this class reports is already multiplied by it.
+        self.weights = [(weights or {}).get(wk, 1.0) for wk in runs.weeks]
         # One evaluator per week: each week has its own floor under every
         # slot, and the imminent week has none.
         self.evaluators = [
@@ -791,10 +795,11 @@ class _Lineups:
                         by_pos.setdefault(pos, []).append((v, v, pid))
                 for lst in by_pos.values():
                     lst.sort(key=_neg_points)
-                self.cells.append(self._cell(by_pos, self.evaluators[len(self.cells) % self.n_weeks]))
+                wk = len(self.cells) % self.n_weeks
+                self.cells.append(self._cell(by_pos, self.evaluators[wk], self.weights[wk]))
 
-    def _cell(self, by_pos: dict, evaluator: LineupEvaluator) -> tuple:
-        """(pools, lineup total, who starts, the bar a newcomer must clear, evaluator).
+    def _cell(self, by_pos: dict, evaluator: LineupEvaluator, weight: float) -> tuple:
+        """(pools, lineup total, who starts, a newcomer's bar, evaluator, week weight).
 
         The bar ignores the week's floor. A newcomer who clears it is seated
         again and scored exactly, floor included; one who does not would not
@@ -815,7 +820,7 @@ class _Lineups:
             bar[group] = (min((lowest[q] for q in group if q in lowest), default=0.0)
                           if filled >= self.slots[group] else 0.0)
         thresholds = {pos: bar[group] for pos, group in self.related.items()}
-        return by_pos, total, seated, thresholds, evaluator
+        return by_pos, total, seated, thresholds, evaluator, weight
 
     def _pools(self, by_pos: dict, drop: Player | None, add: tuple[str, float, str] | None) -> dict:
         pools = dict(by_pos)
@@ -830,7 +835,7 @@ class _Lineups:
         return pools
 
     def _reseat(self, cell, drop: Player | None, add: tuple[str, float, str] | None) -> float:
-        return cell[4].seat(self._pools(cell[0], drop, add))[0] - cell[1]
+        return (cell[4].seat(self._pools(cell[0], drop, add))[0] - cell[1]) * cell[5]
 
     def _points(self, player: Player) -> list[float]:
         """His points in every cell, in cell order."""
@@ -867,8 +872,8 @@ class _Lineups:
             if not keep:
                 out.append(self._reseat(cell, player, None))
                 continue
-            reduced = self._cell(self._pools(cell[0], player, None), cell[4])
-            out.append(reduced[1] - cell[1])
+            reduced = self._cell(self._pools(cell[0], player, None), cell[4], cell[5])
+            out.append((reduced[1] - cell[1]) * cell[5])
             without[i] = reduced
         if keep:
             self._without[player.player_id] = without
@@ -885,7 +890,8 @@ class _Lineups:
         points = self._points(add)
         out = list(add_cells)
         for i, reduced in self._without[drop.player_id].items():
-            out[i] = reduced[1] - self.cells[i][1] + self._gain(reduced, add, points[i])
+            lost = (reduced[1] - self.cells[i][1]) * reduced[5]
+            out[i] = lost + self._gain(reduced, add, points[i])
         return out
 
     def by_week(self, cells: list[float]) -> dict[int, float]:
@@ -904,6 +910,7 @@ def best_moves(
     droppable: set[str] | None = None,
     runs: Runs | None = None,
     floors: dict[int, dict[str, float]] | None = None,
+    weights: dict[int, float] | None = None,
 ) -> list[Move]:
     """Rank signings by what they add to your rest-of-season total, net of the drop.
 
@@ -922,12 +929,16 @@ def best_moves(
 
     `floors` are the wire's worth in each later week, from `stream_floors`.
     Without them an unfilled slot scores zero in every week.
+
+    `weights` are what a point is worth in each week, from
+    `standings.week_weights`. Every value a `Move` carries is weighted by them.
+    Without them every week counts the same.
     """
     evaluator = LineupEvaluator.from_league(league, {})
     if runs is None:
         runs = Runs.single(horizon, {p.player_id for p in roster + free_agents})
     first_week = horizon.weeks[0] if horizon.weeks else 0
-    lineups = _Lineups(evaluator, runs, roster, floors)
+    lineups = _Lineups(evaluator, runs, roster, floors, weights)
     n_runs = len(runs.points)
 
     screened = [(sum(lineups.add(fa, SCREEN_SIMS)), fa) for fa in free_agents]

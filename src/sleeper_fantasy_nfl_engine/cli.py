@@ -25,6 +25,7 @@ from .season import build_season_session
 from .session import build_session, load_config, save_config
 from .simulate import RolloutConfig
 from .sleeper import SleeperClient, SleeperError, clear_cache
+from .standings import flat as flat_weeks, league_leverage
 from .waivers import (
     SIMS,
     WORTH_DOING,
@@ -520,6 +521,11 @@ def waivers(
     projections: Optional[str] = OV,
     no_consensus: bool = NOFP,
     limit: int = typer.Option(8, "--limit", "-n", help="How many moves to list."),
+    equal_weeks: bool = typer.Option(
+        False, "--equal-weeks",
+        help="Count a point the same in every week, instead of weighting each week "
+             "by what it decides for your playoff race.",
+    ),
 ) -> None:
     """Decide whether to sign anyone today, and who to drop to make room.
 
@@ -555,6 +561,11 @@ def waivers(
             roster = [p for p in roster if p is not None]
             pool = [p for pid, p in horizon.players.items() if pid not in taken]
             floors = stream_floors(horizon, pool)
+            leverage = (
+                flat_weeks(horizon_weeks) if equal_weeks
+                else league_leverage(client, sess.league, sess.rosters,
+                                     sess.my_roster_id, horizon)
+            )
             if position:
                 pool = [p for p in pool if p.position == position.upper()]
             pool = shortlist_free_agents(horizon, pool)
@@ -563,7 +574,8 @@ def waivers(
             spare = open_roster_spots(sess.league, row)
             moves = best_moves(sess.league, horizon, roster, pool,
                                spare_spots=spare, limit=limit,
-                               droppable=droppable_ids(row), runs=runs, floors=floors)
+                               droppable=droppable_ids(row), runs=runs, floors=floors,
+                               weights=leverage.weights)
 
         # A failed FantasyPros fetch must not pass Sleeper's numbers off as
         # the blend. The two rankings fail separately, so say which weeks.
@@ -575,6 +587,7 @@ def waivers(
                 f"[yellow]No expert consensus for {weeks_text} — Sleeper projections only.[/]"
             )
         console.print(ui.week_outlook(sess.league, horizon, roster))
+        console.print(ui.leverage_note(leverage))
         console.print()
 
         span = f"weeks {horizon_weeks[0]}–{horizon_weeks[-1]}"

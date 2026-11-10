@@ -40,6 +40,7 @@ from sleeper_fantasy_nfl_engine.waivers import (
     simulate,
     stream_floors,
 )
+from sleeper_fantasy_nfl_engine.standings import PLAYOFF_FOCUS, week_weights
 from harness import make_league
 
 league = make_league()
@@ -397,6 +398,38 @@ due = best_moves(one_qb, late, [qb1, tight], wire_qbs[:1], limit=5,
 assert due and due[0].act_now and abs(due[0].gain - 14.0) < 1e-9, due
 print(f"PASS: with the wire as a floor a bye-week backup costs {cost:.1f} to drop, not 15.0, "
       f"and a fill-in is signed the week he is needed")
+
+# 9e - a point is worth what its week decides. Four teams, two playoff
+# places, a one-week final in week 4. Every weight set averages one.
+sched = {1: [(1, 2), (3, 4)], 2: [(1, 3), (2, 4)], 3: [(1, 4), (2, 3)]}
+level = {rid: {wk: 100.0 for wk in (1, 2, 3, 4, 5)} for rid in (1, 2, 3, 4)}
+
+
+def lev(records, me=1):
+    return week_weights([1, 2, 3, 4, 5], me, records, sched, level,
+                        playoff_start=4, playoff_teams=2, sd=20.0, seasons=3000)
+
+
+# Level with everybody: the regular season decides whether you play the final.
+bubble = lev({1: (3, 900.0), 2: (3, 900.0), 3: (3, 900.0), 4: (3, 900.0)})
+assert abs(sum(bubble.weights[wk] for wk in (1, 2, 3, 4)) / 4 - 1.0) < 1e-9, bubble.weights
+assert 0.3 < bubble.playoff_odds < 0.7, bubble.playoff_odds
+assert bubble.weights[5] == 0.0, "a week after the final decides nothing"
+# Six wins clear with three to play: the place is safe, so the final is what is left.
+safe = lev({1: (9, 900.0), 2: (3, 900.0), 3: (3, 900.0), 4: (3, 900.0)})
+assert safe.playoff_odds > 0.99, safe.playoff_odds
+assert safe.weights[4] > bubble.weights[4], (safe.weights, bubble.weights)
+assert safe.weights[1] < bubble.weights[1], (safe.weights, bubble.weights)
+assert safe.weights[1] == 1 - PLAYOFF_FOCUS, "a dead week keeps only its points value"
+# Six wins adrift: nothing left changes anything, so no week is favoured.
+gone = lev({1: (0, 900.0), 2: (6, 900.0), 3: (6, 900.0), 4: (6, 900.0)})
+assert gone.flat and gone.reason, gone
+# The weights reach the move: the same fill-in is worth more in a heavy week.
+heavy = best_moves(two_wr, bye_horizon, [wr1, wr2, spare], [plugger], limit=5,
+                   weights={1: 1.0, 2: 2.0, 3: 1.0})
+assert abs(heavy[0].gain - 2.0 * alone[0].gain) < 1e-9, (heavy[0].gain, alone[0].gain)
+print(f"PASS: weeks are weighted by what they decide — final ×{safe.weights[4]:.1f} "
+      f"when safe, ×{bubble.weights[4]:.1f} on the bubble")
 
 # 10 - shortlisting keeps the best of every position, not just the best overall.
 many = [mk(f"wr{i}", "WR", 0.0) for i in range(30)] + [mk("lone_te", "TE", 0.0)]

@@ -278,6 +278,31 @@ def week_outlook(league: LeagueSettings, horizon, roster: list[Player]) -> Rende
     return table
 
 
+def leverage_note(leverage) -> Text:
+    """One line on how the weeks are weighted, and the odds behind it."""
+    if leverage.flat:
+        why = f" ({leverage.reason})" if leverage.reason else ""
+        return Text(f"Every week counts the same{why}.", style="dim")
+    def pct(p: float) -> str:
+        # Never round a chance that is not settled up to settled.
+        return ">99%" if 0.995 <= p < 1 else "<1%" if 0 < p < 0.005 else f"{p:.0%}"
+
+    odds = f"Playoff odds {pct(leverage.playoff_odds)}"
+    if leverage.bye_odds:
+        odds += f", first-round bye {pct(leverage.bye_odds)}"
+    runs: list[tuple[int, int, float]] = []
+    for wk in sorted(leverage.weights):
+        w = round(leverage.weights[wk], 1)
+        if runs and runs[-1][2] == w and runs[-1][1] == wk - 1:
+            runs[-1] = (runs[-1][0], wk, w)
+        else:
+            runs.append((wk, wk, w))
+    parts = [
+        (f"week {a}" if a == b else f"weeks {a}–{b}") + f" ×{w:.1f}" for a, b, w in runs
+    ]
+    return Text(f"{odds}. A point counts: {', '.join(parts)}.", style="dim")
+
+
 def rank_cell(player: Player) -> str:
     """Positional rank, and how much the experts disagree about it.
 

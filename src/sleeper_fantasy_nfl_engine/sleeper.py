@@ -127,6 +127,10 @@ class SleeperClient:
     def league_rosters(self, league_id: str) -> list[dict]:
         return self._get(f"{V1}/league/{league_id}/rosters", ttl=300) or []
 
+    def matchups(self, league_id: str, week: int, ttl: float = 300) -> list[dict]:
+        """One week's pairings and scores. A future week has the pairings only."""
+        return self._get(f"{V1}/league/{league_id}/matchups/{week}", ttl=ttl) or []
+
     def league_drafts(self, league_id: str) -> list[dict]:
         return self._get(f"{V1}/league/{league_id}/drafts", ttl=60) or []
 
