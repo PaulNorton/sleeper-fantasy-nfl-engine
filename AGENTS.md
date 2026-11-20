@@ -7,10 +7,7 @@ players whose projection moved.
 
 ## Working agreement
 
-**Commit after each change.** Do not batch work into one large commit and do not
-wait to be asked. Once a change is made and its checks pass, commit it with a
-message describing what changed and why. Work directly on `main`; this is a
-single-author repository.
+Commit directly on `main` as soon as a change is made and both checks pass; do not wait to be asked.
 
 ## Checks
 
@@ -37,7 +34,7 @@ constants against finished seasons; run it when a season ends.
 The analytics are the product. The UI is deliberately plain. When choosing
 between a clearer number and a nicer display, pick the number.
 
-Six files hold judgement calls rather than derived facts. Changing them
+Seven files hold judgement calls rather than derived facts. Changing them
 changes every recommendation, so they are commented and grouped:
 
 - `outcomes.py` - spread constants behind every floor and ceiling. These are
